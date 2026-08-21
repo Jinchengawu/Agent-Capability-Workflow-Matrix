@@ -1,0 +1,17 @@
+capabilities:
+  - id: hermes-developer
+    version: 1.0.0
+    labels: [developer, coding]
+    transport:
+      type: hermes_acp
+      command: [hermes, acp]
+      env: {}
+    permissions:
+      workspace_edits: allow
+      command_allowlist:
+        - git status
+        - git diff
+        - pytest
+        - uv run pytest
+        - python -m pytest
+        - python -c

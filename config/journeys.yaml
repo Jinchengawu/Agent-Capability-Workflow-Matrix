@@ -1,0 +1,12 @@
+journeys:
+  - id: code-delivery-v1
+    version: 1.0.0
+    steps:
+      - kind: node
+        id: plan
+        workflow_mode: direct
+      - kind: approval_gate
+        id: approve-plan
+      - kind: node
+        id: deliver
+        workflow_mode: langgraph.code-delivery
