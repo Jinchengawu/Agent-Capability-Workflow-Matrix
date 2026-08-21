@@ -49,7 +49,7 @@ async def test_http_agent_uses_versioned_wire_contract_and_bearer_env(
     config_path = tmp_path / "capabilities.yaml"
     config_path.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: http-planner
     version: 1.0.0

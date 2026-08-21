@@ -20,7 +20,7 @@ async def test_acp_waits_for_output_and_reuses_session_for_stage_turns(tmp_path:
     path = tmp_path / "capabilities.yaml"
     path.write_text(
         f"""
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: hermes-developer
     version: 1.0.0

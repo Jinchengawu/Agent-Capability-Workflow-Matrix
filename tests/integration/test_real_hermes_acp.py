@@ -19,7 +19,7 @@ async def test_real_hermes_acp_smoke(tmp_path: Path) -> None:
     config_path = tmp_path / "capabilities.yaml"
     config_path.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: hermes-developer
     version: 1.0.0

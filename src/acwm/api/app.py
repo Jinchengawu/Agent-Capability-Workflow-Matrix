@@ -192,14 +192,16 @@ def create_app(
             id="code-delivery-v1",
             version="1.0.0",
             steps=(
-                NodeStepDefinition(
-                    id="plan", capability_id="hermes-developer", workflow_mode="direct"
+                    NodeStepDefinition(
+                    id="plan",
+                    workflow_mode="direct",
+                    bindings={"actor": "hermes-developer"},
                 ),
                 ApprovalGateDefinition(id="approve-plan"),
                 NodeStepDefinition(
                     id="deliver",
-                    capability_id="hermes-developer",
                     workflow_mode="langgraph.code-delivery",
+                    bindings={"developer": "hermes-developer"},
                 ),
             ),
         )
@@ -228,7 +230,7 @@ def create_app(
         finally:
             await service.shutdown()
 
-    app = FastAPI(title="Agent Capability–Workflow Matrix", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Agent Capability–Workflow Matrix", version="0.3.0", lifespan=lifespan)
     app.state.service = service
 
     @app.exception_handler(RequestValidationError)

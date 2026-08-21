@@ -33,16 +33,16 @@ class SQLiteStore:
             )
             if has_version:
                 rows = list(await db.execute_fetchall("SELECT version FROM schema_version"))
-                if not rows or int(rows[0][0]) != 3:
+                if not rows or int(rows[0][0]) != 4:
                     raise LegacyDataDirError(
-                        "ACWM v0.2 requires a new data directory; legacy data is unsupported"
+                        "ACWM v0.3 requires a new data directory; legacy data is unsupported"
                     )
                 return
             await db.executescript(
                 """
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
-                INSERT INTO schema_version(version) VALUES(3);
+                INSERT INTO schema_version(version) VALUES(4);
                 CREATE TABLE IF NOT EXISTS journeys(
                   id TEXT PRIMARY KEY,
                   status TEXT NOT NULL,
@@ -106,7 +106,7 @@ class SQLiteStore:
         payload: dict[str, Any] | None = None,
     ) -> None:
         timestamp = datetime.now(UTC).isoformat()
-        encoded = snapshot.model_dump_json()
+        encoded = snapshot.model_dump_json(exclude_computed_fields=True)
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
