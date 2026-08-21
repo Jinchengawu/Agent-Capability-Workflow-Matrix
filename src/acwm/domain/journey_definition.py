@@ -10,6 +10,7 @@ from .contracts import ImmutableModel
 class NodeStepDefinition(ImmutableModel):
     kind: Literal["node"] = "node"
     id: str
+    capability_id: str
     workflow_mode: Literal["direct", "langgraph.code-delivery"]
 
 

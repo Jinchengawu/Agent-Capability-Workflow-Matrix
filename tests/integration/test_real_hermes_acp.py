@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from acwm.adapters import HermesACPTransportAdapter
-from acwm.domain import CapabilityDescriptor, HermesACPTransport, PermissionPolicy
-from acwm.ports import CapabilityInvocation
+from acwm.adapters import HermesACPCapabilityAdapter
+from acwm.adapters.workflows import DirectWorkflowAdapter
+from acwm.application.runtime import DefaultCapabilityRuntime
+from acwm.config import HermesACPConfig, load_capabilities
+from acwm.domain import AgentTurn, StageRunSpec
 
 
 @pytest.mark.integration
@@ -14,25 +16,41 @@ from acwm.ports import CapabilityInvocation
     reason="set ACWM_REAL_HERMES=1 and configure Hermes model credentials",
 )
 async def test_real_hermes_acp_smoke(tmp_path: Path) -> None:
-    descriptor = CapabilityDescriptor(
-        id="hermes-developer",
-        version="1.0.0",
-        labels=("developer",),
-        transport=HermesACPTransport(command=("hermes", "acp")),
-        permissions=PermissionPolicy(workspace_edits="deny"),
+    config_path = tmp_path / "capabilities.yaml"
+    config_path.write_text(
+        """
+schema_version: "2"
+capabilities:
+  - id: hermes-developer
+    version: 1.0.0
+    adapter:
+      type: hermes.acp
+      config: {command: [hermes, acp]}
+""",
+        encoding="utf-8",
     )
-    adapter = HermesACPTransportAdapter(descriptor)
+    catalog = load_capabilities(config_path)
+    adapter = HermesACPCapabilityAdapter(HermesACPConfig())
+    runtime = DefaultCapabilityRuntime(
+        catalog=catalog, adapters={"hermes-developer": adapter}, event_sink=None
+    )
+    resolved = runtime.resolve("hermes-developer", DirectWorkflowAdapter.mode.requirements)
     try:
-        result = await adapter.invoke(
-            CapabilityInvocation(
-                capability_id=descriptor.id,
-                session_id="acwm:smoke:plan:direct",
-                cwd=tmp_path,
-                purpose="plan",
-                prompt="Reply with the single word READY. Do not use tools.",
+        async with runtime.stage(
+            StageRunSpec(
+                journey_id="smoke",
+                stage_id="plan",
+                attempt_id="attempt",
+                workflow_mode="direct",
+                capability=resolved,
+                objective="smoke",
+                workspace=str(tmp_path),
             )
-        )
+        ) as exchange:
+            result = await exchange.turn(
+                AgentTurn(purpose="plan", instruction="Reply READY. Do not use tools.")
+            )
     finally:
-        await adapter.close()
+        await runtime.close()
 
-    assert result.output.strip()
+    assert result.text.strip()

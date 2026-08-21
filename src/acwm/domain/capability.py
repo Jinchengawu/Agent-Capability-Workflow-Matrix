@@ -1,30 +1,25 @@
-"""Capability axis declarations."""
+"""Provider-neutral Capability declarations and compatibility vocabulary."""
 
+from __future__ import annotations
+
+from enum import StrEnum
 from typing import Literal
-
-from pydantic import Field, field_validator
 
 from .contracts import ImmutableModel
 
 
-class HermesACPTransport(ImmutableModel):
-    type: Literal["hermes_acp"] = "hermes_acp"
-    command: tuple[str, ...] = ("hermes", "acp")
-    profile: str | None = None
-    env: dict[str, str] = Field(default_factory=dict)
-
-    @field_validator("env")
-    @classmethod
-    def environment_values_are_names(cls, value: dict[str, str]) -> dict[str, str]:
-        import re
-
-        for name in value.values():
-            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
-                raise ValueError("environment values must be an environment variable name")
-        return value
+class CapabilityFeature(StrEnum):
+    TEXT_FINAL = "io.text.final"
+    TEXT_STREAM = "io.text.stream"
+    MULTI_TURN = "interaction.multi_turn"
+    CWD_BINDING = "workspace.cwd_binding"
+    PERMISSION = "control.permission"
+    REMOTE_STOP = "control.remote_stop"
+    TOOL_EVENTS = "events.tool"
 
 
-class PermissionPolicy(ImmutableModel):
+class CapabilityPolicy(ImmutableModel):
+    version: str = "1.0"
     workspace_edits: Literal["allow", "ask", "deny"] = "ask"
     command_allowlist: tuple[str, ...] = ()
 
@@ -33,14 +28,31 @@ class CapabilityDescriptor(ImmutableModel):
     id: str
     version: str
     labels: tuple[str, ...] = ()
-    transport: HermesACPTransport
-    permissions: PermissionPolicy = PermissionPolicy()
+    adapter_type: str
+    policy: CapabilityPolicy = CapabilityPolicy()
 
 
-class CapabilitySession(ImmutableModel):
-    """A logical Agent session that never crosses a Stage or Workflow Mode boundary."""
+class WorkflowRequirements(ImmutableModel):
+    mode_id: str
+    mode_version: str
+    required: frozenset[CapabilityFeature]
+    optional: frozenset[CapabilityFeature] = frozenset()
 
-    id: str
-    journey_id: str
-    stage_id: str
-    workflow_mode: str
+
+class AdapterManifest(ImmutableModel):
+    adapter_type: str
+    adapter_version: str
+    features: frozenset[CapabilityFeature]
+
+
+class ResolvedCapability(ImmutableModel):
+    capability_id: str
+    capability_version: str
+    adapter_type: str
+    adapter_version: str
+    features: frozenset[CapabilityFeature]
+    required_features: frozenset[CapabilityFeature]
+    config_fingerprint: str
+    policy_version: str
+    policy_fingerprint: str
+    resolution_schema_version: str = "1.0"

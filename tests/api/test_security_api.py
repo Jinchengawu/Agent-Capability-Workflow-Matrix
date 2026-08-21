@@ -44,7 +44,6 @@ def test_verification_command_must_match_capability_allowlist(tmp_path: Path) ->
             headers={"Idempotency-Key": "unlisted-command"},
             json={
                 "definition_id": "code-delivery-v1",
-                "capability_id": "hermes-developer",
                 "objective": "unsafe verification",
                 "repository": {"path": str(tmp_path), "base_ref": "HEAD"},
                 "verification_commands": [{"name": "not-allowed", "argv": ["git", "push"]}],

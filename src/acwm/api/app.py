@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, Request
@@ -19,18 +19,26 @@ from sse_starlette.sse import EventSourceResponse
 from acwm.adapters import IdempotencyConflictError
 from acwm.adapters.workflows import WORKFLOW_MODES
 from acwm.application import JourneyNotFoundError, JourneyService, StaleDecisionError
+from acwm.application.runtime import (
+    CapabilityNotFoundError,
+    DefaultCapabilityRuntime,
+    WorkflowIncompatibleError,
+)
+from acwm.config import CapabilityCatalog, HermesACPConfig, HermesAdapterSpec
 from acwm.domain import (
+    AdapterManifest,
     ApprovalGateDefinition,
     CapabilityDescriptor,
-    HermesACPTransport,
+    CapabilityFeature,
+    CapabilityPolicy,
     JourneyDefinition,
     JourneyStatus,
     NodeStepDefinition,
-    PermissionPolicy,
     RepositorySpec,
+    TurnResult,
     VerificationCommand,
 )
-from acwm.ports import CapabilityInvocation, CapabilityTransport, TransportResult
+from acwm.ports import CapabilityInvocation, CapabilityTransport
 
 
 class AppSettings(BaseModel):
@@ -43,7 +51,6 @@ class AppSettings(BaseModel):
 class CreateJourneyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     definition_id: str
-    capability_id: str
     objective: str
     repository: RepositorySpec
     verification_commands: tuple[VerificationCommand, ...]
@@ -62,12 +69,82 @@ class PermissionDecisionRequest(BaseModel):
     expected_revision: int
 
 
-class _UnavailableTransport(CapabilityTransport):
-    async def invoke(self, invocation: CapabilityInvocation) -> TransportResult:
-        raise RuntimeError(f"No CapabilityTransport was configured for {invocation.capability_id}")
+class _UnavailableAdapter:
+    manifest = AdapterManifest(
+        adapter_type="hermes.acp",
+        adapter_version="0.2.0",
+        features=frozenset(CapabilityFeature),
+    )
 
-    async def cancel(self, session_id: str) -> None:
+    @asynccontextmanager
+    async def stage(self, spec: Any, emit: Any) -> AsyncIterator[Any]:
+        capability_id = spec.capability.capability_id
+        raise RuntimeError(f"No Capability Adapter was configured for {capability_id}")
+        yield  # pragma: no cover
+
+    async def signal(self, command: Any) -> Any:
+        return type("Receipt", (), {"disposition": "unsupported"})()
+
+    async def close(self) -> None:
         return None
+
+
+class _LegacyTransportAdapter:
+    """Test-only bridge for v0.1 in-process transports; not a public ACWM contract."""
+
+    manifest = _UnavailableAdapter.manifest
+
+    def __init__(self, transport: CapabilityTransport) -> None:
+        self.transport = transport
+
+    @asynccontextmanager
+    async def stage(self, spec: Any, emit: Any) -> AsyncIterator[Any]:
+        if hasattr(self.transport, "set_permission_handler"):
+
+            async def permission_handler(
+                _session_id: str, request_id: str, request: dict[str, Any]
+            ) -> None:
+                await emit(
+                    "capability.permission.required",
+                    {"request_id": request_id, "revision": 1, "request": request},
+                )
+
+            self.transport.set_permission_handler(permission_handler)
+        owner = self
+
+        class Exchange:
+            async def turn(self, turn: Any) -> TurnResult:
+                result = await owner.transport.invoke(
+                    CapabilityInvocation(
+                        capability_id=spec.capability.capability_id,
+                        session_id=spec.attempt_id,
+                        cwd=Path(spec.workspace or "."),
+                        purpose=turn.purpose,
+                        prompt=turn.instruction,
+                    )
+                )
+                return TurnResult(text=result.output)
+
+        yield Exchange()
+
+    async def signal(self, command: Any) -> Any:
+        if hasattr(command, "request_id") and hasattr(self.transport, "resolve_permission"):
+            accepted = self.transport.resolve_permission(
+                command.request_id, command.decision == "approve"
+            )
+            disposition = "accepted" if accepted else "unknown_permission"
+        else:
+            await self.transport.cancel(command.attempt_id)
+            disposition = "accepted"
+        from acwm.domain import SignalReceipt
+
+        receipt_disposition = cast(Literal["accepted", "unknown_permission"], disposition)
+        return SignalReceipt(disposition=receipt_disposition)
+
+    async def close(self) -> None:
+        close = getattr(self.transport, "close", None)
+        if close is not None:
+            await close()
 
 
 def _problem(status: int, code: str, message: str, details: Any = None) -> JSONResponse:
@@ -86,38 +163,60 @@ def create_app(
     settings: AppSettings,
     *,
     transport: CapabilityTransport | None = None,
-    capabilities: dict[str, CapabilityDescriptor] | None = None,
+    runtime: DefaultCapabilityRuntime | None = None,
+    catalog: CapabilityCatalog | None = None,
     journey_definitions: dict[str, JourneyDefinition] | None = None,
 ) -> FastAPI:
     if settings.host not in {"127.0.0.1", "localhost", "::1"} and not settings.api_key:
         raise ValueError("ACWM_API_KEY is required for non-loopback binding")
-    registry = capabilities or {
+    registry = {
         "hermes-developer": CapabilityDescriptor(
             id="hermes-developer",
             version="1.0.0",
             labels=("developer", "coding"),
-            transport=HermesACPTransport(),
-            permissions=PermissionPolicy(
+            adapter_type="hermes.acp",
+            policy=CapabilityPolicy(
                 workspace_edits="allow",
                 command_allowlist=("git status", "pytest", "python -c"),
             ),
         )
     }
+    active_catalog = catalog or CapabilityCatalog(
+        descriptors=registry,
+        adapter_configs={
+            "hermes-developer": HermesAdapterSpec(type="hermes.acp", config=HermesACPConfig())
+        },
+    )
     definitions = journey_definitions or {
         "code-delivery-v1": JourneyDefinition(
             id="code-delivery-v1",
             version="1.0.0",
             steps=(
-                NodeStepDefinition(id="plan", workflow_mode="direct"),
+                NodeStepDefinition(
+                    id="plan", capability_id="hermes-developer", workflow_mode="direct"
+                ),
                 ApprovalGateDefinition(id="approve-plan"),
-                NodeStepDefinition(id="deliver", workflow_mode="langgraph.code-delivery"),
+                NodeStepDefinition(
+                    id="deliver",
+                    capability_id="hermes-developer",
+                    workflow_mode="langgraph.code-delivery",
+                ),
             ),
         )
     }
+    active_runtime = runtime or DefaultCapabilityRuntime(
+        catalog=active_catalog,
+        adapters={
+            "hermes-developer": (
+                _LegacyTransportAdapter(transport) if transport else _UnavailableAdapter()
+            )
+        },
+        event_sink=None,
+    )
     service = JourneyService(
         data_dir=settings.data_dir,
-        transport=transport or _UnavailableTransport(),
-        capabilities=registry,
+        runtime=active_runtime,
+        catalog=active_catalog,
         definitions=definitions,
     )
 
@@ -129,7 +228,7 @@ def create_app(
         finally:
             await service.shutdown()
 
-    app = FastAPI(title="Agent Capability–Workflow Matrix", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Agent Capability–Workflow Matrix", version="0.2.0", lifespan=lifespan)
     app.state.service = service
 
     @app.exception_handler(RequestValidationError)
@@ -154,7 +253,21 @@ def create_app(
 
     @app.get("/v1/capabilities")
     async def list_capabilities() -> list[dict[str, Any]]:
-        return [descriptor.model_dump(mode="json") for descriptor in registry.values()]
+        result = []
+        for capability_id, descriptor in active_catalog.descriptors.items():
+            manifest = active_runtime.adapters[capability_id].manifest
+            result.append(
+                {
+                    "id": descriptor.id,
+                    "version": descriptor.version,
+                    "labels": list(descriptor.labels),
+                    "adapter_type": manifest.adapter_type,
+                    "adapter_version": manifest.adapter_version,
+                    "features": sorted(manifest.features),
+                    "health": "available",
+                }
+            )
+        return result
 
     @app.get("/v1/workflow-modes")
     async def list_workflow_modes() -> list[dict[str, Any]]:
@@ -174,7 +287,6 @@ def create_app(
                 return JSONResponse(status_code=remembered[0], content=remembered[1])
             snapshot = await service.create_journey(
                 definition_id=body.definition_id,
-                capability_id=body.capability_id,
                 objective=body.objective,
                 repository=body.repository,
                 verification_commands=body.verification_commands,
@@ -186,6 +298,18 @@ def create_app(
             return _problem(409, "idempotency_conflict", str(error))
         except ValueError as error:
             return _problem(422, "invalid_journey", str(error))
+        except WorkflowIncompatibleError as error:
+            return _problem(
+                422,
+                "workflow_incompatible",
+                str(error),
+                {
+                    "capability_id": error.capability_id,
+                    "missing_features": sorted(error.missing_features),
+                },
+            )
+        except CapabilityNotFoundError as error:
+            return _problem(422, error.code, str(error))
 
     @app.get("/v1/journeys/{journey_id}")
     async def get_journey(journey_id: str) -> JSONResponse:

@@ -13,10 +13,12 @@ from acwm.adapters.workflows import (
     DirectWorkflowAdapter,
     LangGraphCodeDeliveryAdapter,
 )
+from acwm.application.runtime import EventPublicationError
+from acwm.config import CapabilityCatalog
 from acwm.domain import (
     AttemptSnapshot,
     AttemptStatus,
-    CapabilityDescriptor,
+    CapabilityEvent,
     GateSnapshot,
     GateStatus,
     HandoffEnvelope,
@@ -25,15 +27,16 @@ from acwm.domain import (
     JourneyStatus,
     NodeRequest,
     NodeStepDefinition,
+    PermissionDecision,
     PermissionSnapshot,
     RepositorySpec,
     ResolvedNode,
     StageSnapshot,
     StageStatus,
+    StopRequested,
     VerificationCommand,
     utc_now,
 )
-from acwm.ports import CapabilityTransport
 
 
 class JourneyNotFoundError(KeyError):
@@ -49,23 +52,22 @@ class JourneyService:
         self,
         *,
         data_dir: Path,
-        transport: CapabilityTransport,
-        capabilities: dict[str, CapabilityDescriptor],
+        runtime: Any,
+        catalog: CapabilityCatalog,
         definitions: dict[str, JourneyDefinition],
     ) -> None:
         self.data_dir = data_dir
         self.store = SQLiteStore(data_dir / "acwm.sqlite")
         self.artifacts = ArtifactStore(data_dir / "artifacts")
         self.workspaces = GitWorkspaceManager(data_dir / "workspaces")
-        self.transport = transport
-        self.capabilities = capabilities
+        self.runtime = runtime
+        self.catalog = catalog
+        self.capabilities = catalog.descriptors
         self.definitions = definitions
-        self.direct = DirectWorkflowAdapter(transport)
-        self.code_delivery = LangGraphCodeDeliveryAdapter(transport, data_dir / "langgraph.sqlite")
+        self.direct = DirectWorkflowAdapter(runtime)
+        self.code_delivery = LangGraphCodeDeliveryAdapter(runtime, data_dir / "langgraph.sqlite")
         self._tasks: set[asyncio.Task[None]] = set()
-        set_handler = getattr(transport, "set_permission_handler", None)
-        if set_handler is not None:
-            set_handler(self._permission_required)
+        runtime.event_sink = self.handle_capability_event
 
     async def initialize(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -77,9 +79,7 @@ class JourneyService:
             task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
-        close = getattr(self.transport, "close", None)
-        if close is not None:
-            await close()
+        await self.runtime.close()
 
     def _schedule(self, coroutine: Any) -> None:
         task = asyncio.create_task(coroutine)
@@ -90,7 +90,6 @@ class JourneyService:
         self,
         *,
         definition_id: str,
-        capability_id: str,
         objective: str,
         repository: RepositorySpec,
         verification_commands: tuple[VerificationCommand, ...],
@@ -98,15 +97,36 @@ class JourneyService:
         definition = self.definitions.get(definition_id)
         if definition is None:
             raise ValueError("Unknown Journey definition")
-        descriptor = self.capabilities.get(capability_id)
-        if descriptor is None:
-            raise ValueError("Unknown Capability")
+        resolved_steps: list[tuple[NodeStepDefinition, Any, Any]] = []
+        for step in definition.steps:
+            if not isinstance(step, NodeStepDefinition):
+                continue
+            workflow = self._workflow(step.workflow_mode)
+            resolved_steps.append(
+                (
+                    step,
+                    workflow,
+                    self.runtime.resolve(step.capability_id, workflow.mode.requirements),
+                )
+            )
         for command in verification_commands:
             rendered = " ".join(command.argv)
-            if not any(
+            delivery = next(
+                (
+                    entry
+                    for entry in resolved_steps
+                    if entry[0].workflow_mode == self.code_delivery.mode.id
+                ),
+                None,
+            )
+            if delivery is None:
+                raise ValueError("Journey has no code-delivery Stage")
+            policy = self.capabilities[delivery[0].capability_id].policy
+            command_allowed = any(
                 rendered == allowed or rendered.startswith(f"{allowed} ")
-                for allowed in descriptor.permissions.command_allowlist
-            ):
+                for allowed in policy.command_allowlist
+            )
+            if not command_allowed:
                 raise ValueError(
                     f"verification command is not in the Capability allowlist: {rendered}"
                 )
@@ -114,7 +134,6 @@ class JourneyService:
         snapshot = JourneySnapshot(
             id=journey_id,
             definition_id=definition_id,
-            capability_id=capability_id,
             objective=objective,
             repository=repository,
             verification_commands=verification_commands,
@@ -123,18 +142,12 @@ class JourneyService:
                     id=step.id,
                     resolved_node=ResolvedNode(
                         node_id=step.id,
-                        capability_id=capability_id,
-                        capability_version=descriptor.version,
                         workflow_mode=step.workflow_mode,
-                        workflow_version=(
-                            self.direct.mode.version
-                            if step.workflow_mode == self.direct.mode.id
-                            else self.code_delivery.mode.version
-                        ),
+                        workflow_version=workflow.mode.version,
+                        capability=resolved,
                     ),
                 )
-                for step in definition.steps
-                if isinstance(step, NodeStepDefinition)
+                for step, workflow, resolved in resolved_steps
             ),
             gates=tuple(
                 GateSnapshot(id=step.id)
@@ -200,12 +213,26 @@ class JourneyService:
         if snapshot.status is JourneyStatus.CANCELLED:
             return snapshot
         cancelled_attempt_ids: set[str] = set()
+        unconfirmed_attempt_ids: set[str] = set()
         for attempt in reversed(snapshot.attempts):
             if attempt.status is AttemptStatus.RUNNING:
-                await self.transport.cancel(attempt.session_id)
+                receipt = await self.runtime.signal(
+                    StopRequested(attempt_id=attempt.id, reason="journey_cancelled")
+                )
                 cancelled_attempt_ids.add(attempt.id)
+                if receipt.disposition == "unsupported":
+                    unconfirmed_attempt_ids.add(attempt.id)
         attempts = tuple(
-            item.model_copy(update={"status": AttemptStatus.CANCELLED, "finished_at": utc_now()})
+            item.model_copy(
+                update={
+                    "status": (
+                        AttemptStatus.CANCELLING
+                        if item.id in unconfirmed_attempt_ids
+                        else AttemptStatus.CANCELLED
+                    ),
+                    "finished_at": None if item.id in unconfirmed_attempt_ids else utc_now(),
+                }
+            )
             if item.id in cancelled_attempt_ids
             else item
             for item in snapshot.attempts
@@ -227,14 +254,22 @@ class JourneyService:
         )
         updated = snapshot.model_copy(
             update={
-                "status": JourneyStatus.CANCELLED,
+                "status": (
+                    JourneyStatus.CANCELLING if unconfirmed_attempt_ids else JourneyStatus.CANCELLED
+                ),
                 "attempts": attempts,
                 "stages": stages,
                 "gates": gates,
                 "updated_at": utc_now(),
             }
         )
-        await self.store.save(updated, "journey.cancelled")
+        await self.store.save(
+            updated,
+            "journey.cancel_requested" if unconfirmed_attempt_ids else "journey.cancelled",
+            payload=(
+                {"warning": "remote_termination_unconfirmed"} if unconfirmed_attempt_ids else None
+            ),
+        )
         return updated
 
     async def resume_attempt(self, journey_id: str, attempt_id: str) -> JourneySnapshot:
@@ -313,8 +348,15 @@ class JourneyService:
             entity_type="permission",
             entity_id=request_id,
         )
-        resolver = getattr(self.transport, "resolve_permission", None)
-        if resolver is None or not resolver(request_id, decision == "approve"):
+        receipt = await self.runtime.signal(
+            PermissionDecision(
+                attempt_id=permission.attempt_id,
+                request_id=request_id,
+                revision=expected_revision,
+                decision=decision,
+            )
+        )
+        if receipt.disposition != "accepted":
             orphaned = snapshot.model_copy(
                 update={"status": JourneyStatus.NEEDS_ATTENTION, "updated_at": utc_now()}
             )
@@ -327,18 +369,24 @@ class JourneyService:
             raise StaleDecisionError("ACP permission request is no longer live")
         return snapshot
 
-    async def _permission_required(
-        self, session_id: str, request_id: str, request: dict[str, Any]
-    ) -> None:
-        parts = session_id.split(":", 4)
-        if len(parts) < 3 or parts[0] != "acwm":
-            raise ValueError("Permission request has an invalid ACWM session id")
-        journey_id = parts[1]
+    async def handle_capability_event(self, event: CapabilityEvent) -> None:
+        journey_id = event.journey_id
+        if event.type != "capability.permission.required":
+            await self.store.append_event(
+                journey_id,
+                event.type,
+                entity_type="attempt",
+                entity_id=event.attempt_id,
+                payload={"sequence": event.sequence, **event.payload},
+            )
+            return
         snapshot = await self.get(journey_id)
+        request_id = str(event.payload["request_id"])
         permission = PermissionSnapshot(
             id=request_id,
-            session_id=session_id,
-            request=request,
+            attempt_id=event.attempt_id,
+            revision=int(event.payload.get("revision", 1)),
+            request=dict(event.payload.get("request", {})),
         )
         snapshot = snapshot.model_copy(
             update={
@@ -353,8 +401,15 @@ class JourneyService:
             "permission.required",
             entity_type="permission",
             entity_id=request_id,
-            payload={"revision": permission.revision, "request": request},
+            payload={"revision": permission.revision, "request": permission.request},
         )
+
+    def _workflow(self, workflow_mode: str) -> Any:
+        if workflow_mode == self.direct.mode.id:
+            return self.direct
+        if workflow_mode == self.code_delivery.mode.id:
+            return self.code_delivery
+        raise ValueError(f"Unknown Workflow mode: {workflow_mode}")
 
     async def _run_plan(
         self, journey_id: str, prior_attempt: AttemptSnapshot | None = None
@@ -369,8 +424,8 @@ class JourneyService:
             )
             attempt = self._attempt(
                 "plan",
-                journey_id,
-                "direct",
+                self._stage(snapshot, "plan").resolved_node.capability.capability_id,
+                resumable=False,
                 retries_attempt_id=prior_attempt.id if prior_attempt else None,
             )
             snapshot = self._start_stage(snapshot, "plan", attempt).model_copy(
@@ -386,14 +441,15 @@ class JourneyService:
                     attempt_id=attempt.id,
                     journey_id=snapshot.id,
                     stage_id="plan",
-                    capability_id=snapshot.capability_id,
-                    session_id=attempt.session_id,
-                    cwd=str(workspace.path),
+                    capability=self._stage(snapshot, "plan").resolved_node.capability,
+                    workspace=str(workspace.path),
                     objective=snapshot.objective,
                 )
             )
             snapshot = await self.get(journey_id)
-            if snapshot.status is JourneyStatus.CANCELLED:
+            if snapshot.status in {JourneyStatus.CANCELLED, JourneyStatus.CANCELLING}:
+                if snapshot.status is JourneyStatus.CANCELLING:
+                    await self._finalize_cancellation(snapshot)
                 return
             plan = self.artifacts.put(
                 "implementation_plan", "text/markdown", result.output.encode()
@@ -445,8 +501,8 @@ class JourneyService:
             )
             attempt = self._attempt(
                 "deliver",
-                journey_id,
-                "langgraph",
+                self._stage(snapshot, "deliver").resolved_node.capability.capability_id,
+                resumable=True,
                 retries_attempt_id=prior_attempt.id if prior_attempt and not resume else None,
                 resumes_attempt_id=prior_attempt.id if prior_attempt and resume else None,
                 checkpoint_thread_id=(
@@ -479,12 +535,12 @@ class JourneyService:
             )
             result = await self.code_delivery.execute(
                 NodeRequest(
-                    attempt_id=attempt.checkpoint_thread_id or attempt.id,
+                    attempt_id=attempt.id,
+                    checkpoint_thread_id=attempt.checkpoint_thread_id,
                     journey_id=snapshot.id,
                     stage_id="deliver",
-                    capability_id=snapshot.capability_id,
-                    session_id=attempt.session_id,
-                    cwd=str(workspace.path),
+                    capability=self._stage(snapshot, "deliver").resolved_node.capability,
+                    workspace=str(workspace.path),
                     objective=snapshot.objective,
                     handoff=handoff,
                     artifacts=(plan,),
@@ -493,7 +549,9 @@ class JourneyService:
                 )
             )
             snapshot = await self.get(journey_id)
-            if snapshot.status is JourneyStatus.CANCELLED:
+            if snapshot.status in {JourneyStatus.CANCELLED, JourneyStatus.CANCELLING}:
+                if snapshot.status is JourneyStatus.CANCELLING:
+                    await self._finalize_cancellation(snapshot)
                 return
             patch = self.artifacts.put("patch", "text/x-diff", self.workspaces.patch(workspace))
             evidence = self.artifacts.put(
@@ -539,8 +597,8 @@ class JourneyService:
     def _attempt(
         self,
         stage_id: str,
-        journey_id: str,
-        mode: str,
+        capability_id: str,
+        resumable: bool,
         *,
         retries_attempt_id: str | None = None,
         resumes_attempt_id: str | None = None,
@@ -551,14 +609,16 @@ class JourneyService:
             id=attempt_id,
             stage_id=stage_id,
             status=AttemptStatus.RUNNING,
-            session_id=f"acwm:{journey_id}:{stage_id}:{mode}",
-            checkpoint_thread_id=(checkpoint_thread_id or attempt_id)
-            if mode == "langgraph"
-            else None,
+            capability_id=capability_id,
+            checkpoint_thread_id=(checkpoint_thread_id or attempt_id) if resumable else None,
             retries_attempt_id=retries_attempt_id,
             resumes_attempt_id=resumes_attempt_id,
             started_at=utc_now(),
         )
+
+    @staticmethod
+    def _stage(snapshot: JourneySnapshot, stage_id: str) -> StageSnapshot:
+        return next(item for item in snapshot.stages if item.id == stage_id)
 
     @staticmethod
     def _start_stage(
@@ -598,6 +658,19 @@ class JourneyService:
         snapshot = await self.get(journey_id)
         if snapshot.status is JourneyStatus.CANCELLED:
             return
+        if snapshot.status is JourneyStatus.CANCELLING:
+            await self._finalize_cancellation(snapshot)
+            return
+        if isinstance(error, EventPublicationError):
+            attention = snapshot.model_copy(
+                update={"status": JourneyStatus.NEEDS_ATTENTION, "updated_at": utc_now()}
+            )
+            await self.store.save(
+                attention,
+                "journey.needs_attention",
+                payload={"code": error.code},
+            )
+            return
         attempts = tuple(
             item.model_copy(
                 update={
@@ -628,6 +701,26 @@ class JourneyService:
             entity_type="stage",
             entity_id=stage_id,
             payload={"error": str(error)},
+        )
+
+    async def _finalize_cancellation(self, snapshot: JourneySnapshot) -> None:
+        attempts = tuple(
+            item.model_copy(update={"status": AttemptStatus.CANCELLED, "finished_at": utc_now()})
+            if item.status is AttemptStatus.CANCELLING
+            else item
+            for item in snapshot.attempts
+        )
+        finalized = snapshot.model_copy(
+            update={
+                "status": JourneyStatus.CANCELLED,
+                "attempts": attempts,
+                "updated_at": utc_now(),
+            }
+        )
+        await self.store.save(
+            finalized,
+            "journey.cancelled",
+            payload={"warning": "remote_termination_unconfirmed"},
         )
 
     async def _reconcile_startup(self) -> None:

@@ -2,13 +2,41 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from acwm.domain import NodeRequest, NodeResult, WorkflowMode
+from acwm.domain import (
+    AgentTurn,
+    NodeRequest,
+    NodeResult,
+    PermissionDecision,
+    ResolvedCapability,
+    SignalReceipt,
+    StageRunSpec,
+    StopRequested,
+    TurnResult,
+    WorkflowMode,
+    WorkflowRequirements,
+)
 
 
+class CapabilityExchange(Protocol):
+    async def turn(self, turn: AgentTurn) -> TurnResult: ...
+
+
+class CapabilityRuntime(Protocol):
+    def resolve(
+        self, capability_id: str, requirements: WorkflowRequirements
+    ) -> ResolvedCapability: ...
+
+    def stage(self, spec: StageRunSpec) -> AbstractAsyncContextManager[CapabilityExchange]: ...
+
+    async def signal(self, command: PermissionDecision | StopRequested) -> SignalReceipt: ...
+
+
+# Temporary v0.1 compatibility shim while the application service is upgraded.
 @dataclass(frozen=True, slots=True)
 class CapabilityInvocation:
     capability_id: str
