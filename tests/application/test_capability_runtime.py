@@ -47,7 +47,7 @@ def test_runtime_resolves_compatible_capability_and_rejects_missing_features(
     path = tmp_path / "capabilities.yaml"
     path.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: http-planner
     version: 1.0.0
@@ -101,7 +101,7 @@ async def test_stage_context_publishes_ordered_terminal_events(tmp_path: Path) -
     path = tmp_path / "capabilities.yaml"
     path.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: http-planner
     version: 1.0.0

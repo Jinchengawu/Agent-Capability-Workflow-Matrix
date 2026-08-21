@@ -5,11 +5,11 @@ import pytest
 from acwm.config import ConfigurationError, load_capabilities
 
 
-def test_schema_v2_loads_provider_neutral_capabilities(tmp_path: Path) -> None:
+def test_schema_v3_loads_provider_neutral_capabilities(tmp_path: Path) -> None:
     config = tmp_path / "capabilities.yaml"
     config.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: hermes-developer
     version: 1.0.0

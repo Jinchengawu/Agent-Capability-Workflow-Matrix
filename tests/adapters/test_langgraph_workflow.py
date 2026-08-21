@@ -64,7 +64,7 @@ def make_runtime(tmp_path: Path, adapter: RepairingAdapter) -> DefaultCapability
     path = tmp_path / "capabilities.yaml"
     path.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: hermes-developer
     version: 1.0.0

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from acwm.adapters import ArtifactStore, GitWorkspaceManager, ManagedWorkspace, SQLiteStore
+from acwm.adapters.artifacts import ArtifactStore
+from acwm.adapters.git_workspace import GitWorkspaceManager, ManagedWorkspace
+from acwm.adapters.sqlite_store import SQLiteStore
 from acwm.adapters.workflows import (
     DirectWorkflowAdapter,
     LangGraphCodeDeliveryAdapter,
@@ -21,6 +23,7 @@ from acwm.domain import (
     CapabilityEvent,
     GateSnapshot,
     GateStatus,
+    GateSubject,
     HandoffEnvelope,
     JourneyDefinition,
     JourneySnapshot,
@@ -150,7 +153,7 @@ class JourneyService:
                 for step, workflow, resolved in resolved_steps
             ),
             gates=tuple(
-                GateSnapshot(id=step.id)
+                GateSnapshot(id=step.id, subject_kind=step.subject_kind)
                 for step in definition.steps
                 if not isinstance(step, NodeStepDefinition)
             ),
@@ -462,6 +465,11 @@ class JourneyService:
                 update={
                     "status": GateStatus.OPEN,
                     "revision": snapshot.revision + 1,
+                    "subject": GateSubject(
+                        kind=snapshot.gates[0].subject_kind,
+                        artifact_id=plan.artifact_id,
+                        sha256=plan.sha256,
+                    ),
                     "plan_hash": plan.sha256,
                 }
             )
@@ -479,7 +487,11 @@ class JourneyService:
                 "gate.opened",
                 entity_type="gate",
                 entity_id=gate.id,
-                payload={"revision": gate.revision, "plan_hash": gate.plan_hash},
+                payload={
+                    "revision": gate.revision,
+                    "subject_kind": gate.subject_kind,
+                    "subject_hash": gate.plan_hash,
+                },
             )
         except Exception as error:
             await self._record_failure(journey_id, "plan", error)

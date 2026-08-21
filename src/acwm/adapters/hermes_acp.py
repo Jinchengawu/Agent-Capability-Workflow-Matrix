@@ -304,7 +304,7 @@ class HermesACPCapabilityAdapter:
             self._process = process
             await connection.initialize(
                 protocol_version=acp.PROTOCOL_VERSION,
-                client_info=Implementation(name="acwm", title="ACWM", version="0.2.0"),
+                client_info=Implementation(name="acwm", title="ACWM", version="0.3.0"),
             )
             return connection
 

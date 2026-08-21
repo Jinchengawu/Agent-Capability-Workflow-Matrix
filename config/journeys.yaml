@@ -1,16 +1,17 @@
-schema_version: "2"
+schema_version: "3"
 
 journeys:
   - id: mixed-code-delivery
     version: "2.0.0"
     steps:
-      - kind: node
+      - kind: stage
         id: plan
-        capability_id: http-planner
         workflow_mode: direct
+        bindings: {actor: http-planner}
       - kind: approval_gate
         id: approve-plan
-      - kind: node
+        subject_kind: implementation-plan
+      - kind: stage
         id: deliver
-        capability_id: hermes-developer
         workflow_mode: langgraph.code-delivery
+        bindings: {developer: hermes-developer}

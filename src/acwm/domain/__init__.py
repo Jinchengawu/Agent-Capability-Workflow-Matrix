@@ -13,6 +13,7 @@ from .execution import (
     AttemptSnapshot,
     ExecutionEvent,
     GateSnapshot,
+    GateSubject,
     JourneySnapshot,
     NodeRequest,
     NodeResult,
@@ -20,8 +21,11 @@ from .execution import (
     RepositorySpec,
     ResolvedNode,
     StageSnapshot,
+    StaleGateDecision,
     VerificationCommand,
     WorkflowMode,
+    decide_gate,
+    open_gate,
     utc_now,
 )
 from .journey_definition import (
@@ -29,6 +33,7 @@ from .journey_definition import (
     JourneyDefinition,
     JourneyStepDefinition,
     NodeStepDefinition,
+    StageDefinition,
 )
 from .runtime_contracts import (
     AgentTurn,
@@ -48,6 +53,16 @@ from .state import (
     transition_attempt,
     transition_journey,
 )
+from .workflow import (
+    ResolvedJourney,
+    ResolvedStage,
+    ResolvedWorkflow,
+    StageExecutionSpec,
+    StageResult,
+    StageValidationReport,
+    WorkflowBindingSlot,
+    WorkflowManifest,
+)
 
 __all__ = [
     "ArtifactRef",
@@ -63,6 +78,7 @@ __all__ = [
     "DomainTransitionError",
     "ExecutionEvent",
     "GateSnapshot",
+    "GateSubject",
     "GateStatus",
     "HandoffEnvelope",
     "ImmutableModel",
@@ -77,17 +93,29 @@ __all__ = [
     "PermissionDecision",
     "RepositorySpec",
     "ResolvedNode",
+    "ResolvedJourney",
+    "ResolvedStage",
+    "ResolvedWorkflow",
+    "StageExecutionSpec",
+    "StageResult",
+    "StageValidationReport",
     "ResolvedCapability",
     "StageSnapshot",
+    "StageDefinition",
     "StageRunSpec",
     "StageStatus",
     "VerificationCommand",
     "WorkflowMode",
+    "WorkflowBindingSlot",
+    "WorkflowManifest",
     "WorkflowRequirements",
     "SignalReceipt",
+    "StaleGateDecision",
     "StopRequested",
     "TurnResult",
     "transition_attempt",
     "transition_journey",
+    "decide_gate",
+    "open_gate",
     "utc_now",
 ]

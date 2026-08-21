@@ -47,6 +47,7 @@ class RepositorySpec(ImmutableModel):
 
 class ResolvedNode(ImmutableModel):
     node_id: str
+    slot: str = "actor"
     workflow_mode: str
     workflow_version: str
     capability: ResolvedCapability
@@ -59,11 +60,58 @@ class StageSnapshot(ImmutableModel):
     current_attempt_id: str | None = None
 
 
+class GateSubject(ImmutableModel):
+    kind: str
+    artifact_id: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class GateSnapshot(ImmutableModel):
     id: str
+    subject_kind: str = "artifact"
     status: GateStatus = GateStatus.PENDING
     revision: int = 0
+    subject: GateSubject | None = None
     plan_hash: str | None = None
+
+
+class StaleGateDecision(ValueError):
+    pass
+
+
+def open_gate(
+    gate: GateSnapshot, *, subject: GateSubject, revision: int
+) -> GateSnapshot:
+    if gate.status is not GateStatus.PENDING:
+        raise StaleGateDecision("Gate is not pending")
+    if gate.subject_kind != subject.kind:
+        raise StaleGateDecision("Gate subject kind does not match its definition")
+    return gate.model_copy(
+        update={
+            "status": GateStatus.OPEN,
+            "revision": revision,
+            "subject": subject,
+            "plan_hash": subject.sha256,
+        }
+    )
+
+
+def decide_gate(
+    gate: GateSnapshot,
+    *,
+    decision: Literal["approve", "reject"],
+    expected_revision: int,
+    expected_subject_hash: str,
+) -> GateSnapshot:
+    if (
+        gate.status is not GateStatus.OPEN
+        or gate.revision != expected_revision
+        or gate.subject is None
+        or gate.subject.sha256 != expected_subject_hash
+    ):
+        raise StaleGateDecision("Gate revision or subject hash is stale")
+    target = GateStatus.APPROVED if decision == "approve" else GateStatus.REJECTED
+    return gate.model_copy(update={"status": target})
 
 
 class AttemptSnapshot(ImmutableModel):

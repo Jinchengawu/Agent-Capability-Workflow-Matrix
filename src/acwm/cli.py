@@ -10,7 +10,11 @@ from typing import Any
 
 import uvicorn
 
-from acwm.adapters import HermesACPCapabilityAdapter, HttpSyncCapabilityAdapter
+from acwm.adapters import (
+    CodexCLICapabilityAdapter,
+    HermesACPCapabilityAdapter,
+    HttpSyncCapabilityAdapter,
+)
 from acwm.api import AppSettings, create_app
 from acwm.application.runtime import DefaultCapabilityRuntime
 from acwm.config import load_capabilities, load_journeys
@@ -40,8 +44,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             adapters[capability_id] = HermesACPCapabilityAdapter(
                 spec.config, capabilities.descriptors[capability_id].policy
             )
-        else:
+        elif spec.type == "http.sync":
             adapters[capability_id] = HttpSyncCapabilityAdapter(spec.config)
+        else:
+            adapters[capability_id] = CodexCLICapabilityAdapter(spec.config)
     runtime = DefaultCapabilityRuntime(catalog=capabilities, adapters=adapters, event_sink=None)
     app = create_app(
         AppSettings(

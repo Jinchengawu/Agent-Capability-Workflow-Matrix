@@ -47,6 +47,12 @@ class HttpSyncConfig(_StrictModel):
         return value
 
 
+class CodexCLIConfig(_StrictModel):
+    command: tuple[str, ...] = ("codex",)
+    timeout_seconds: int = Field(default=180, ge=1, le=3600)
+    sandbox: Literal["read-only", "workspace-write"] = "workspace-write"
+
+
 class HermesAdapterSpec(_StrictModel):
     type: Literal["hermes.acp"]
     config: HermesACPConfig = HermesACPConfig()
@@ -57,7 +63,15 @@ class HttpAdapterSpec(_StrictModel):
     config: HttpSyncConfig
 
 
-AdapterSpec = Annotated[HermesAdapterSpec | HttpAdapterSpec, Field(discriminator="type")]
+class CodexAdapterSpec(_StrictModel):
+    type: Literal["codex.cli"]
+    config: CodexCLIConfig = CodexCLIConfig()
+
+
+AdapterSpec = Annotated[
+    HermesAdapterSpec | HttpAdapterSpec | CodexAdapterSpec,
+    Field(discriminator="type"),
+]
 
 
 class CapabilityEntry(_StrictModel):
@@ -69,12 +83,12 @@ class CapabilityEntry(_StrictModel):
 
 
 class CapabilityFile(_StrictModel):
-    schema_version: Literal["2"]
+    schema_version: Literal["3"]
     capabilities: tuple[CapabilityEntry, ...]
 
 
 class JourneyFile(_StrictModel):
-    schema_version: Literal["2"]
+    schema_version: Literal["3"]
     journeys: tuple[JourneyDefinition, ...]
 
 

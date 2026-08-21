@@ -31,7 +31,7 @@ def http_catalog(tmp_path: Path) -> CapabilityCatalog:
     config = tmp_path / "capabilities.yaml"
     config.write_text(
         """
-schema_version: "2"
+schema_version: "3"
 capabilities:
   - id: http-planner
     version: 1.0.0
@@ -62,8 +62,8 @@ def test_http_capability_is_rejected_for_langgraph_before_journey_creation(
         steps=(
             NodeStepDefinition(
                 id="deliver",
-                capability_id="http-planner",
                 workflow_mode="langgraph.code-delivery",
+                bindings={"developer": "http-planner"},
             ),
         ),
     )
@@ -97,11 +97,11 @@ def test_http_capability_is_rejected_for_langgraph_before_journey_creation(
 
 
 @pytest.mark.asyncio
-async def test_v02_rejects_legacy_sqlite_data_directory(tmp_path: Path) -> None:
+async def test_v03_rejects_v02_sqlite_data_directory(tmp_path: Path) -> None:
     database = tmp_path / "acwm.sqlite"
     async with aiosqlite.connect(database) as connection:
         await connection.execute("CREATE TABLE schema_version(version INTEGER NOT NULL)")
-        await connection.execute("INSERT INTO schema_version(version) VALUES(2)")
+        await connection.execute("INSERT INTO schema_version(version) VALUES(3)")
         await connection.commit()
 
     with pytest.raises(LegacyDataDirError) as captured:
