@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from .capability import CapabilityFeature, ResolvedCapability, WorkflowRequirements
 from .contracts import ArtifactRef, HandoffEnvelope, ImmutableModel
 from .state import AttemptStatus, GateStatus, JourneyStatus, StageStatus
 
@@ -20,6 +21,17 @@ class WorkflowMode(ImmutableModel):
     version: str
     description: str
     resumable: bool
+    required_features: frozenset[CapabilityFeature]
+    optional_features: frozenset[CapabilityFeature] = frozenset()
+
+    @property
+    def requirements(self) -> WorkflowRequirements:
+        return WorkflowRequirements(
+            mode_id=self.id,
+            mode_version=self.version,
+            required=self.required_features,
+            optional=self.optional_features,
+        )
 
 
 class VerificationCommand(ImmutableModel):
@@ -35,11 +47,9 @@ class RepositorySpec(ImmutableModel):
 
 class ResolvedNode(ImmutableModel):
     node_id: str
-    capability_id: str
-    capability_version: str
     workflow_mode: str
     workflow_version: str
-    policy_version: str = "1.0"
+    capability: ResolvedCapability
 
 
 class StageSnapshot(ImmutableModel):
@@ -60,7 +70,7 @@ class AttemptSnapshot(ImmutableModel):
     id: str
     stage_id: str
     status: AttemptStatus
-    session_id: str
+    capability_id: str
     started_at: datetime
     finished_at: datetime | None = None
     retries_attempt_id: str | None = None
@@ -71,7 +81,7 @@ class AttemptSnapshot(ImmutableModel):
 
 class PermissionSnapshot(ImmutableModel):
     id: str
-    session_id: str
+    attempt_id: str
     status: Literal["pending", "approved", "rejected"] = "pending"
     revision: int = 1
     request: dict[str, Any]
@@ -80,7 +90,6 @@ class PermissionSnapshot(ImmutableModel):
 class JourneySnapshot(ImmutableModel):
     id: str
     definition_id: str
-    capability_id: str
     objective: str
     repository: RepositorySpec
     base_sha: str | None = None
@@ -113,10 +122,10 @@ class NodeRequest(ImmutableModel):
     attempt_id: str
     journey_id: str
     stage_id: str
-    capability_id: str
-    session_id: str
-    cwd: str
+    capability: ResolvedCapability
     objective: str
+    checkpoint_thread_id: str | None = None
+    workspace: str | None = None
     handoff: HandoffEnvelope | None = None
     artifacts: tuple[ArtifactRef, ...] = ()
     verification_commands: tuple[VerificationCommand, ...] = ()

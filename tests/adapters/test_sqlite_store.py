@@ -10,7 +10,6 @@ async def test_event_log_rebuilds_deleted_snapshot_cache(tmp_path: Path) -> None
     snapshot = JourneySnapshot(
         id="journey-1",
         definition_id="code-delivery-v1",
-        capability_id="hermes-developer",
         objective="Rebuild me",
         repository=RepositorySpec(path=str(tmp_path), base_ref="HEAD"),
         stages=(),

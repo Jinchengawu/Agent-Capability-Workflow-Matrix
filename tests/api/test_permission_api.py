@@ -75,7 +75,6 @@ def test_acp_permission_is_persisted_and_resolved_through_the_api(tmp_path: Path
             headers={"Idempotency-Key": "permission-create"},
             json={
                 "definition_id": "code-delivery-v1",
-                "capability_id": "hermes-developer",
                 "objective": "Plan a change",
                 "repository": {"path": str(repository), "base_ref": "HEAD"},
                 "verification_commands": [],

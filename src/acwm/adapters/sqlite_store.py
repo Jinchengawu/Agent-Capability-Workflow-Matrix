@@ -17,6 +17,10 @@ class IdempotencyConflictError(ValueError):
     pass
 
 
+class LegacyDataDirError(RuntimeError):
+    code = "legacy_data_dir_unsupported"
+
+
 class SQLiteStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -24,12 +28,21 @@ class SQLiteStore:
 
     async def initialize(self) -> None:
         async with aiosqlite.connect(self.path) as db:
+            has_version = await db.execute_fetchall(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            )
+            if has_version:
+                rows = list(await db.execute_fetchall("SELECT version FROM schema_version"))
+                if not rows or int(rows[0][0]) != 3:
+                    raise LegacyDataDirError(
+                        "ACWM v0.2 requires a new data directory; legacy data is unsupported"
+                    )
+                return
             await db.executescript(
                 """
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
-                INSERT INTO schema_version(version)
-                  SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+                INSERT INTO schema_version(version) VALUES(3);
                 CREATE TABLE IF NOT EXISTS journeys(
                   id TEXT PRIMARY KEY,
                   status TEXT NOT NULL,
@@ -55,10 +68,32 @@ class SQLiteStore:
                 );
                 """
             )
-            columns = await db.execute_fetchall("PRAGMA table_info(events)")
-            if "snapshot_json" not in {str(column[1]) for column in columns}:
-                await db.execute("ALTER TABLE events ADD COLUMN snapshot_json TEXT")
-            await db.execute("UPDATE schema_version SET version=2")
+            await db.commit()
+
+    async def append_event(
+        self,
+        journey_id: str,
+        event_type: str,
+        *,
+        entity_type: str,
+        entity_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        timestamp = datetime.now(UTC).isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO events(
+                journey_id,type,entity_type,entity_id,payload_json,snapshot_json,timestamp
+                ) VALUES(?,?,?,?,?,NULL,?)""",
+                (
+                    journey_id,
+                    event_type,
+                    entity_type,
+                    entity_id,
+                    json.dumps(self._redact(payload or {}), sort_keys=True),
+                    timestamp,
+                ),
+            )
             await db.commit()
 
     async def save(

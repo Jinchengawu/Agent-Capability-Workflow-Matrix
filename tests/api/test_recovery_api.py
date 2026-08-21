@@ -72,7 +72,6 @@ def test_restart_marks_attempt_interrupted_and_resume_creates_a_new_attempt(tmp_
     data_dir = tmp_path / "data"
     request = {
         "definition_id": "code-delivery-v1",
-        "capability_id": "hermes-developer",
         "objective": "Change value.txt to new",
         "repository": {"path": str(repository), "base_ref": source_head},
         "verification_commands": [

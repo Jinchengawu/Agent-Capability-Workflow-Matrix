@@ -1,10 +1,12 @@
 """Public ACWM domain contracts."""
 
 from .capability import (
+    AdapterManifest,
     CapabilityDescriptor,
-    CapabilitySession,
-    HermesACPTransport,
-    PermissionPolicy,
+    CapabilityFeature,
+    CapabilityPolicy,
+    ResolvedCapability,
+    WorkflowRequirements,
 )
 from .contracts import ArtifactRef, HandoffEnvelope, ImmutableModel
 from .execution import (
@@ -28,6 +30,15 @@ from .journey_definition import (
     JourneyStepDefinition,
     NodeStepDefinition,
 )
+from .runtime_contracts import (
+    AgentTurn,
+    CapabilityEvent,
+    PermissionDecision,
+    SignalReceipt,
+    StageRunSpec,
+    StopRequested,
+    TurnResult,
+)
 from .state import (
     AttemptStatus,
     DomainTransitionError,
@@ -41,16 +52,19 @@ from .state import (
 __all__ = [
     "ArtifactRef",
     "ApprovalGateDefinition",
+    "AdapterManifest",
+    "AgentTurn",
     "AttemptStatus",
     "AttemptSnapshot",
     "CapabilityDescriptor",
-    "CapabilitySession",
+    "CapabilityFeature",
+    "CapabilityPolicy",
+    "CapabilityEvent",
     "DomainTransitionError",
     "ExecutionEvent",
     "GateSnapshot",
     "GateStatus",
     "HandoffEnvelope",
-    "HermesACPTransport",
     "ImmutableModel",
     "JourneyStatus",
     "JourneyDefinition",
@@ -59,14 +73,20 @@ __all__ = [
     "NodeResult",
     "NodeRequest",
     "NodeStepDefinition",
-    "PermissionPolicy",
     "PermissionSnapshot",
+    "PermissionDecision",
     "RepositorySpec",
     "ResolvedNode",
+    "ResolvedCapability",
     "StageSnapshot",
+    "StageRunSpec",
     "StageStatus",
     "VerificationCommand",
     "WorkflowMode",
+    "WorkflowRequirements",
+    "SignalReceipt",
+    "StopRequested",
+    "TurnResult",
     "transition_attempt",
     "transition_journey",
     "utc_now",

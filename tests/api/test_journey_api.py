@@ -58,7 +58,6 @@ def test_api_runs_direct_approval_and_langgraph_in_an_isolated_worktree(tmp_path
     app = create_app(AppSettings(data_dir=tmp_path / "data"), transport=transport)
     request = {
         "definition_id": "code-delivery-v1",
-        "capability_id": "hermes-developer",
         "objective": "Change value.txt to new",
         "repository": {"path": str(repository), "base_ref": source_head},
         "verification_commands": [
@@ -149,7 +148,6 @@ def test_cancel_is_idempotent(tmp_path: Path) -> None:
             headers={"Idempotency-Key": "create-cancel"},
             json={
                 "definition_id": "code-delivery-v1",
-                "capability_id": "hermes-developer",
                 "objective": "Plan only",
                 "repository": {"path": str(repository), "base_ref": "HEAD"},
                 "verification_commands": [],

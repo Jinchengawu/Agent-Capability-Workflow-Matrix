@@ -9,6 +9,7 @@ class JourneyStatus(StrEnum):
     RUNNING = "running"
     AWAITING_APPROVAL = "awaiting_approval"
     AWAITING_PERMISSION = "awaiting_permission"
+    CANCELLING = "cancelling"
     NEEDS_ATTENTION = "needs_attention"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -18,6 +19,7 @@ class JourneyStatus(StrEnum):
 class AttemptStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
+    CANCELLING = "cancelling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
@@ -54,6 +56,7 @@ _JOURNEY_TRANSITIONS = {
         JourneyStatus.COMPLETED,
         JourneyStatus.FAILED,
         JourneyStatus.CANCELLED,
+        JourneyStatus.CANCELLING,
     },
     JourneyStatus.AWAITING_APPROVAL: {JourneyStatus.RUNNING, JourneyStatus.CANCELLED},
     JourneyStatus.AWAITING_PERMISSION: {
@@ -62,6 +65,7 @@ _JOURNEY_TRANSITIONS = {
         JourneyStatus.FAILED,
         JourneyStatus.CANCELLED,
     },
+    JourneyStatus.CANCELLING: {JourneyStatus.CANCELLED, JourneyStatus.NEEDS_ATTENTION},
     JourneyStatus.NEEDS_ATTENTION: {
         JourneyStatus.RUNNING,
         JourneyStatus.COMPLETED,
@@ -80,7 +84,9 @@ _ATTEMPT_TRANSITIONS = {
         AttemptStatus.FAILED,
         AttemptStatus.INTERRUPTED,
         AttemptStatus.CANCELLED,
+        AttemptStatus.CANCELLING,
     },
+    AttemptStatus.CANCELLING: {AttemptStatus.CANCELLED, AttemptStatus.FAILED},
     AttemptStatus.SUCCEEDED: set(),
     AttemptStatus.FAILED: set(),
     AttemptStatus.INTERRUPTED: set(),
