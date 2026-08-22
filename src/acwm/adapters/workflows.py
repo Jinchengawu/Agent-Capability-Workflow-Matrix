@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -126,10 +127,15 @@ class LangGraphCodeDeliveryAdapter:
             async def verify(_state: CodeState) -> dict[str, Any]:
                 evidence: list[dict[str, Any]] = []
                 for command in request.verification_commands:
+                    runtime_argv = (
+                        (sys.executable, *command.argv[1:])
+                        if command.argv[0] == "python"
+                        else command.argv
+                    )
                     process = None
                     try:
                         process = await asyncio.create_subprocess_exec(
-                            *command.argv,
+                            *runtime_argv,
                             cwd=cwd,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
