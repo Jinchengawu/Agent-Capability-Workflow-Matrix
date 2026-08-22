@@ -17,10 +17,19 @@ ability participates. It is a cross-Workflow Journey control plane, not an Agent
 - **Stage Exchange**: one Attempt-scoped Capability context owned by a Workflow Adapter.
 - **HandoffEnvelope**: immutable, hashed contract between Stages. Native sessions and provider
   state never cross a Stage boundary.
-- **Journey**: durable application-level sequence of Node Stages and approval gates.
+- **Journey Graph**: an immutable outer directed acyclic graph of Stages, approval Gates and
+  bounded Loop Nodes. It is the durable cross-Workflow execution definition.
+- **Journey Edge**: a directed dependency between two outer graph Nodes. An optional condition
+  policy selects a branch from committed upstream outcomes.
+- **Loop Node**: an explicit control Node whose body is itself acyclic and may be repeated. It owns
+  a maximum iteration count, deadline, exit-condition policy and exhaustion action. Arbitrary
+  cyclic Journey Edges are invalid.
+- **Pipeline**: the product-facing identity and revision lifecycle of a Journey Graph. ACWM owns
+  graph semantics; consuming products own catalog, permissions, activation and business inputs.
 
-Control-plane truth lives in the ACWM event log. Workflow checkpoints own only mode-internal cursor
-state. Products own business facts, Artifact bytes, code-product truth and final side effects.
+Control-plane truth lives in the ACWM event log. Node Runs, Attempts and Loop Iterations are
+append-only execution facts. Workflow checkpoints own only mode-internal cursor state. Products own
+business facts, Artifact bytes, code-product truth and final side effects.
 
 AgentScope messages, sessions, memory and topology never become ACWM Journey state. Only coarse
 Stage progress, Artifact references, attention requests and terminal outcomes cross the boundary.

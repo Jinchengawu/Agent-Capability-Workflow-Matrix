@@ -9,8 +9,10 @@ from typing import Any, Protocol
 from acwm.domain import (
     ApprovalGateDefinition,
     JourneyDefinition,
+    LoopDefinition,
     ResolvedCapability,
     ResolvedJourney,
+    ResolvedLoop,
     ResolvedNode,
     ResolvedStage,
     ResolvedWorkflow,
@@ -20,6 +22,7 @@ from acwm.domain import (
     StageValidationReport,
     WorkflowManifest,
     WorkflowRequirements,
+    compile_journey_graph,
 )
 
 
@@ -123,20 +126,52 @@ class DefaultWorkflowRuntime:
         )
 
     def resolve_journey(self, definition: JourneyDefinition) -> ResolvedJourney:
+        compiled = compile_journey_graph(definition)
+        outer_nodes = definition.graph_nodes
+        compiled_loops = {loop.node_id: loop for loop in compiled.loops}
         return ResolvedJourney(
             journey_id=definition.id,
             journey_version=definition.version,
-            order=tuple(step.id for step in definition.steps),
+            order=compiled.topological_order,
             stages=tuple(
-                self.resolve(step)
-                for step in definition.steps
-                if isinstance(step, StageDefinition)
+                self.resolve(node)
+                for node in outer_nodes
+                if isinstance(node, StageDefinition)
             ),
             gates=tuple(
-                step
-                for step in definition.steps
-                if isinstance(step, ApprovalGateDefinition)
+                node
+                for node in outer_nodes
+                if isinstance(node, ApprovalGateDefinition)
             ),
+            edges=compiled.edges,
+            entry_node_ids=compiled.entry_node_ids,
+            exit_node_ids=compiled.exit_node_ids,
+            loops=tuple(
+                self._resolve_loop(node, compiled_loops[node.id])
+                for node in outer_nodes
+                if isinstance(node, LoopDefinition)
+            ),
+            graph_fingerprint=compiled.fingerprint,
+        )
+
+    def _resolve_loop(self, definition: LoopDefinition, compiled: Any) -> ResolvedLoop:
+        return ResolvedLoop(
+            node_id=definition.id,
+            order=compiled.topological_order,
+            entry_node_ids=compiled.entry_node_ids,
+            exit_node_ids=compiled.exit_node_ids,
+            edges=compiled.edges,
+            stages=tuple(
+                self.resolve(node)
+                for node in definition.nodes
+                if isinstance(node, StageDefinition)
+            ),
+            gates=tuple(
+                node
+                for node in definition.nodes
+                if isinstance(node, ApprovalGateDefinition)
+            ),
+            policy=definition.policy,
         )
 
     async def execute(

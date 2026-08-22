@@ -13,6 +13,9 @@ from acwm.domain import (
     ApprovalGateDefinition,
     CapabilityFeature,
     JourneyDefinition,
+    JourneyEdgeDefinition,
+    LoopDefinition,
+    LoopPolicyDefinition,
     ResolvedCapability,
     StageDefinition,
     StageExecutionSpec,
@@ -174,6 +177,55 @@ def test_journey_resolution_freezes_all_stages_without_executing_them() -> None:
     assert resolved.order == ("requirements", "tasking", "approve-plan")
     assert [stage.stage_id for stage in resolved.stages] == ["requirements", "tasking"]
     assert resolved.gates[0].subject_kind == "delivery-plan"
+
+
+def test_journey_resolution_freezes_graph_and_loop_stages() -> None:
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    resolved = runtime.resolve_journey(
+        JourneyDefinition(
+            id="review-loop",
+            version="4.0.0",
+            nodes=(
+                StageDefinition(
+                    id="plan",
+                    workflow_mode="agentscope.role-turn",
+                    bindings={"actor": "hermes-pm"},
+                ),
+                LoopDefinition(
+                    id="review-until-approved",
+                    nodes=(
+                        StageDefinition(
+                            id="review",
+                            workflow_mode="agentscope.role-turn",
+                            bindings={"actor": "hermes-reviewer"},
+                        ),
+                    ),
+                    edges=(),
+                    policy=LoopPolicyDefinition(
+                        exit_condition="review-approved",
+                        max_iterations=2,
+                        timeout_seconds=120,
+                        on_exhausted="needs_attention",
+                    ),
+                ),
+            ),
+            edges=(
+                JourneyEdgeDefinition(source="plan", target="review-until-approved"),
+            ),
+        )
+    )
+
+    assert resolved.order == ("plan", "review-until-approved")
+    assert resolved.entry_node_ids == ("plan",)
+    assert len(resolved.graph_fingerprint) == 64
+    assert resolved.stages[0].stage_id == "plan"
+    assert resolved.loops[0].node_id == "review-until-approved"
+    assert resolved.loops[0].stages[0].stage_id == "review"
+    assert resolved.loops[0].policy.max_iterations == 2
 
 
 async def test_code_delivery_delegates_one_autonomous_turn_to_codex_capability(

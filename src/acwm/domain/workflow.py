@@ -11,7 +11,11 @@ from pydantic import Field
 from .capability import CapabilityFeature, WorkflowRequirements
 from .contracts import ArtifactRef, HandoffEnvelope, ImmutableModel
 from .execution import ResolvedNode
-from .journey_definition import ApprovalGateDefinition
+from .journey_definition import (
+    ApprovalGateDefinition,
+    JourneyEdgeDefinition,
+    LoopPolicyDefinition,
+)
 
 
 class WorkflowBindingSlot(ImmutableModel):
@@ -67,12 +71,28 @@ class ResolvedStage(ImmutableModel):
     output_validator: str | None = None
 
 
+class ResolvedLoop(ImmutableModel):
+    node_id: str
+    order: tuple[str, ...]
+    entry_node_ids: tuple[str, ...]
+    exit_node_ids: tuple[str, ...]
+    edges: tuple[JourneyEdgeDefinition, ...]
+    stages: tuple[ResolvedStage, ...]
+    gates: tuple[ApprovalGateDefinition, ...]
+    policy: LoopPolicyDefinition
+
+
 class ResolvedJourney(ImmutableModel):
     journey_id: str
     journey_version: str
     order: tuple[str, ...]
     stages: tuple[ResolvedStage, ...]
     gates: tuple[ApprovalGateDefinition, ...]
+    edges: tuple[JourneyEdgeDefinition, ...] = ()
+    entry_node_ids: tuple[str, ...] = ()
+    exit_node_ids: tuple[str, ...] = ()
+    loops: tuple[ResolvedLoop, ...] = ()
+    graph_fingerprint: str | None = None
 
 
 class StageExecutionSpec(ImmutableModel):

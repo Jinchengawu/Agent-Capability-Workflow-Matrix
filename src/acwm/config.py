@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from acwm.domain.capability import CapabilityDescriptor, CapabilityPolicy
 from acwm.domain.journey_definition import JourneyDefinition
@@ -88,8 +96,16 @@ class CapabilityFile(_StrictModel):
 
 
 class JourneyFile(_StrictModel):
-    schema_version: Literal["3"]
+    schema_version: Literal["3", "4"]
     journeys: tuple[JourneyDefinition, ...]
+
+    @model_validator(mode="after")
+    def representation_matches_schema(self) -> JourneyFile:
+        if self.schema_version == "3" and any(journey.nodes for journey in self.journeys):
+            raise ValueError("Journey schema v3 requires ordered steps")
+        if self.schema_version == "4" and any(journey.steps for journey in self.journeys):
+            raise ValueError("Journey schema v4 requires graph nodes and edges")
+        return self
 
 
 @dataclass(frozen=True, slots=True)

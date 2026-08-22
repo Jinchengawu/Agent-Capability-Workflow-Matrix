@@ -31,9 +31,19 @@ from .execution import (
 from .journey_definition import (
     ApprovalGateDefinition,
     JourneyDefinition,
+    JourneyEdgeDefinition,
+    JourneyNodeDefinition,
     JourneyStepDefinition,
+    LoopDefinition,
+    LoopPolicyDefinition,
     NodeStepDefinition,
     StageDefinition,
+)
+from .journey_graph import (
+    CompiledJourneyGraph,
+    CompiledLoopGraph,
+    JourneyGraphError,
+    compile_journey_graph,
 )
 from .runtime_contracts import (
     AgentTurn,
@@ -55,6 +65,7 @@ from .state import (
 )
 from .workflow import (
     ResolvedJourney,
+    ResolvedLoop,
     ResolvedStage,
     ResolvedWorkflow,
     StageExecutionSpec,
@@ -84,7 +95,14 @@ __all__ = [
     "ImmutableModel",
     "JourneyStatus",
     "JourneyDefinition",
+    "JourneyEdgeDefinition",
+    "JourneyNodeDefinition",
+    "JourneyGraphError",
+    "CompiledJourneyGraph",
+    "CompiledLoopGraph",
     "JourneyStepDefinition",
+    "LoopDefinition",
+    "LoopPolicyDefinition",
     "JourneySnapshot",
     "NodeResult",
     "NodeRequest",
@@ -94,6 +112,7 @@ __all__ = [
     "RepositorySpec",
     "ResolvedNode",
     "ResolvedJourney",
+    "ResolvedLoop",
     "ResolvedStage",
     "ResolvedWorkflow",
     "StageExecutionSpec",
@@ -117,5 +136,6 @@ __all__ = [
     "transition_journey",
     "decide_gate",
     "open_gate",
+    "compile_journey_graph",
     "utc_now",
 ]

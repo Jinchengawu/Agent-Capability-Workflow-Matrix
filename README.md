@@ -4,16 +4,19 @@ ACWM 是面向应用层长程任务的薄控制平面。它把 Agent 的深度�
 
 ```text
 Agent-Team-OS / consuming product
-  └─ ACWM Journey: Stage -> Handoff -> Gate -> Stage
+  └─ ACWM Journey Graph: Stage / Gate / bounded Loop
        ├─ AgentScope Workflow -> Hermes Capability
        └─ Code Delivery Workflow -> Codex Capability
 ```
 
 ACWM 不提供另一套 Agent、Memory、Session、Sandbox 或部署平台。Stage 内部的消息、拓扑、会话和 Checkpoint 属于 Workflow Adapter；Hermes/Codex 的循环、工具和私有记忆属于 Capability Adapter；产品拥有业务事实、Artifact 正文和最终 Apply。
 
-## v0.3 核心能力
+## v0.4 核心能力
 
-- schema v3 `Journey -> Stage | Gate`，一个 Stage 支持多个具名 Capability Binding。
+- schema v4 外层 DAG `Journey -> Stage | Gate | Loop`；一个 Stage 支持多个具名 Capability Binding。
+- DAG 支持 fork/join 和条件策略引用；拓扑编译生成确定性顺序、入口、出口与 SHA-256。
+- Loop 是显式有限子图，必须配置退出条件、最大轮次、超时与耗尽动作；任意回边被拒绝。
+- schema v3 线性 `steps` 继续读取并规范化为单路径 DAG。
 - `WorkflowManifest` 声明 Binding Slot 和 Feature 要求，配置不能伪造能力。
 - `ResolvedWorkflow`、`ResolvedStage`、`ResolvedNode` 固化版本与指纹。
 - `CapabilityRuntime` 与 `DefaultWorkflowRuntime` 两条独立扩展轴。
@@ -89,7 +92,7 @@ uv sync --extra server
 uv run acwm serve --data-dir /absolute/path/acwm-data
 ```
 
-配置 schema v3 与 v0.2 YAML/data-dir 不兼容；SQLite 存储 schema 已提升为 4，请使用新的数据目录。ACWM 不自动 merge、push、创建 PR 或更新产品主分支。
+新图定义使用配置 schema v4；schema v3 线性 Journey 保持只读兼容。SQLite 存储 schema 仍为 4，请使用与旧 v0.2 隔离的数据目录。ACWM 不自动 merge、push、创建 PR 或更新产品主分支。
 
 ## License
 
