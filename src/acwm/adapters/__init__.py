@@ -11,6 +11,7 @@ _EXPORTS = {
     "CodexCLICapabilityAdapter": "acwm.adapters.codex_cli",
     "CodeDeliveryWorkflowAdapter": "acwm.adapters.code_delivery",
     "GitWorkspaceManager": "acwm.adapters.git_workspace",
+    "GraphRunVersionConflict": "acwm.adapters.sqlite_store",
     "HermesACPCapabilityAdapter": "acwm.adapters.hermes_acp",
     "HttpSyncCapabilityAdapter": "acwm.adapters.http_sync",
     "IdempotencyConflictError": "acwm.adapters.sqlite_store",

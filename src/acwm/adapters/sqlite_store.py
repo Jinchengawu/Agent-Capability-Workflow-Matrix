@@ -10,10 +10,14 @@ from typing import Any
 
 import aiosqlite
 
-from acwm.domain import ExecutionEvent, JourneySnapshot
+from acwm.domain import ExecutionEvent, GraphRun, JourneySnapshot
 
 
 class IdempotencyConflictError(ValueError):
+    pass
+
+
+class GraphRunVersionConflict(ValueError):
     pass
 
 
@@ -33,16 +37,20 @@ class SQLiteStore:
             )
             if has_version:
                 rows = list(await db.execute_fetchall("SELECT version FROM schema_version"))
-                if not rows or int(rows[0][0]) != 4:
+                if not rows or int(rows[0][0]) not in {4, 5}:
                     raise LegacyDataDirError(
-                        "ACWM v0.3 requires a new data directory; legacy data is unsupported"
+                        "ACWM v0.4 requires schema 4 or 5; older data is unsupported"
                     )
+                if int(rows[0][0]) == 4:
+                    await db.executescript(_GRAPH_RUN_SCHEMA)
+                    await db.execute("UPDATE schema_version SET version=5")
+                    await db.commit()
                 return
             await db.executescript(
                 """
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
-                INSERT INTO schema_version(version) VALUES(4);
+                INSERT INTO schema_version(version) VALUES(5);
                 CREATE TABLE IF NOT EXISTS journeys(
                   id TEXT PRIMARY KEY,
                   status TEXT NOT NULL,
@@ -68,7 +76,61 @@ class SQLiteStore:
                 );
                 """
             )
+            await db.executescript(_GRAPH_RUN_SCHEMA)
             await db.commit()
+
+    async def save_graph_run(
+        self,
+        run: GraphRun,
+        event_type: str,
+        *,
+        expected_version: int,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        timestamp = datetime.now(UTC).isoformat()
+        encoded = run.model_dump_json()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT version FROM graph_runs WHERE id=?", (run.id,)
+            )
+            row = await cursor.fetchone()
+            actual_version = int(row[0]) if row else 0
+            if actual_version != expected_version:
+                await db.rollback()
+                raise GraphRunVersionConflict(
+                    f"Graph Run {run.id} expected version {expected_version}, "
+                    f"actual {actual_version}"
+                )
+            await db.execute(
+                """INSERT INTO graph_runs(id,status,version,snapshot_json,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                status=excluded.status,version=excluded.version,
+                snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at""",
+                (run.id, run.status, run.version, encoded, timestamp),
+            )
+            await db.execute(
+                """INSERT INTO graph_run_events(
+                graph_run_id,type,run_version,payload_json,snapshot_json,timestamp)
+                VALUES(?,?,?,?,?,?)""",
+                (
+                    run.id,
+                    event_type,
+                    run.version,
+                    json.dumps(self._redact(payload or {}), sort_keys=True),
+                    encoded,
+                    timestamp,
+                ),
+            )
+            await db.commit()
+
+    async def get_graph_run(self, run_id: str) -> GraphRun | None:
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "SELECT snapshot_json FROM graph_runs WHERE id=?", (run_id,)
+            )
+            row = await cursor.fetchone()
+        return GraphRun.model_validate_json(row[0]) if row else None
 
     async def append_event(
         self,
@@ -246,3 +308,25 @@ class SQLiteStore:
             marker in normalized
             for marker in ("secret", "password", "token", "api_key", "authorization")
         )
+
+
+_GRAPH_RUN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS graph_runs(
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS graph_run_events(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  graph_run_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  run_version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  timestamp TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS graph_run_events_by_run
+ON graph_run_events(graph_run_id, id);
+"""
