@@ -4,15 +4,41 @@ from acwm.domain import (
     LoopDefinition,
     LoopPolicyDefinition,
     StageDefinition,
+    cancel_graph_run,
     compile_journey_graph,
     complete_loop_iteration,
     create_graph_run,
+    fail_graph_node,
     start_graph_node,
     start_loop_body_node,
     start_loop_iteration,
     succeed_graph_node,
     succeed_loop_body_node,
 )
+
+
+def test_running_node_failure_terminates_graph_and_preserves_audit_state() -> None:
+    graph = _parallel_graph()
+    run = start_graph_node(create_graph_run("run-failed", graph), "plan")
+
+    failed = fail_graph_node(run, "plan")
+
+    assert failed.status == "failed"
+    assert failed.version == run.version + 1
+    assert next(node for node in failed.nodes if node.node_id == "plan").status == "failed"
+    assert next(node for node in failed.nodes if node.node_id == "delivery").status == "cancelled"
+
+
+def test_cancel_graph_run_is_idempotent_and_cancels_non_terminal_nodes() -> None:
+    graph = _parallel_graph()
+    run = create_graph_run("run-cancelled", graph)
+
+    cancelled = cancel_graph_run(run)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.version == run.version + 1
+    assert {node.status for node in cancelled.nodes} == {"cancelled"}
+    assert cancel_graph_run(cancelled) == cancelled
 
 
 def _parallel_graph():

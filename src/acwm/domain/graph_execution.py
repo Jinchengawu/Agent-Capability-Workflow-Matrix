@@ -141,6 +141,59 @@ def succeed_graph_node(
     )
 
 
+def fail_graph_node(run: GraphRun, node_id: str) -> GraphRun:
+    """Fail a running node and terminate every unfinished branch."""
+    node = _node(run, node_id)
+    if node.status is not GraphNodeStatus.RUNNING:
+        raise GraphTransitionError(f"Graph Node {node_id} is not running")
+    nodes = tuple(
+        item.model_copy(
+            update={
+                "status": (
+                    GraphNodeStatus.FAILED
+                    if item.node_id == node_id
+                    else GraphNodeStatus.CANCELLED
+                )
+            }
+        )
+        if item.status
+        not in {
+            GraphNodeStatus.SUCCEEDED,
+            GraphNodeStatus.FAILED,
+            GraphNodeStatus.SKIPPED,
+            GraphNodeStatus.CANCELLED,
+        }
+        else item
+        for item in run.nodes
+    )
+    return run.model_copy(
+        update={"nodes": nodes, "status": "failed", "version": run.version + 1}
+    )
+
+
+def cancel_graph_run(run: GraphRun) -> GraphRun:
+    """Cancel a non-terminal GraphRun while retaining completed node evidence."""
+    if run.status == "cancelled":
+        return run
+    if run.status != "running":
+        raise GraphTransitionError(f"Graph Run {run.id} is already terminal")
+    terminal = {
+        GraphNodeStatus.SUCCEEDED,
+        GraphNodeStatus.FAILED,
+        GraphNodeStatus.SKIPPED,
+        GraphNodeStatus.CANCELLED,
+    }
+    nodes = tuple(
+        item
+        if item.status in terminal
+        else item.model_copy(update={"status": GraphNodeStatus.CANCELLED})
+        for item in run.nodes
+    )
+    return run.model_copy(
+        update={"nodes": nodes, "status": "cancelled", "version": run.version + 1}
+    )
+
+
 def start_loop_iteration(run: GraphRun, node_id: str) -> GraphRun:
     node = _node(run, node_id)
     loop = _loop(run, node_id)
