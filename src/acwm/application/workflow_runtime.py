@@ -8,12 +8,15 @@ from typing import Any, Protocol
 
 from acwm.domain import (
     ApprovalGateDefinition,
+    CapabilityProviderManifest,
     JourneyDefinition,
     LoopDefinition,
+    ProviderBindingSite,
     ResolvedCapability,
     ResolvedJourney,
     ResolvedLoop,
     ResolvedNode,
+    ResolvedProviderBinding,
     ResolvedStage,
     ResolvedWorkflow,
     StageDefinition,
@@ -50,6 +53,39 @@ class CapabilityResolver(Protocol):
     def stage(self, spec: Any) -> AbstractAsyncContextManager[Any]: ...
 
 
+class ProviderResolver(Protocol):
+    def resolve(
+        self,
+        site: ProviderBindingSite,
+        capability: ResolvedCapability,
+        requirements: WorkflowRequirements,
+    ) -> ResolvedProviderBinding: ...
+
+
+class StaticProviderResolver:
+    """Resolve immutable Provider manifests by one Stage binding site."""
+
+    def __init__(self, assignments: Mapping[str, CapabilityProviderManifest]) -> None:
+        self.assignments = dict(assignments)
+
+    def resolve(
+        self,
+        site: ProviderBindingSite,
+        capability: ResolvedCapability,
+        requirements: WorkflowRequirements,
+    ) -> ResolvedProviderBinding:
+        try:
+            provider = self.assignments[site.reference]
+        except KeyError as error:
+            raise ValueError(f"provider assignment missing for {site.reference}") from error
+        return ResolvedProviderBinding.create(
+            site=site,
+            capability=capability,
+            provider=provider,
+            requirements=requirements,
+        )
+
+
 class WorkflowAdapter(Protocol):
     manifest: WorkflowManifest
 
@@ -75,13 +111,17 @@ class DefaultWorkflowRuntime:
         *,
         capability_runtime: CapabilityResolver,
         adapters: Mapping[str, WorkflowAdapter],
+        provider_resolver: ProviderResolver | None = None,
         validators: Mapping[str, StageOutputValidator] | None = None,
     ) -> None:
         self.capability_runtime = capability_runtime
         self.adapters = dict(adapters)
+        self.provider_resolver = provider_resolver
         self.validators = dict(validators or {})
 
-    def resolve(self, stage: StageDefinition) -> ResolvedStage:
+    def resolve(
+        self, stage: StageDefinition, *, node_path: str | None = None
+    ) -> ResolvedStage:
         adapter = self.adapters.get(stage.workflow_mode)
         if adapter is None:
             raise WorkflowNotFoundError(stage.workflow_mode)
@@ -104,17 +144,12 @@ class DefaultWorkflowRuntime:
             raise WorkflowBindingError("; ".join(details))
 
         nodes = tuple(
-            ResolvedNode(
-                node_id=f"{stage.id}:{slot_name}",
-                slot=slot_name,
-                workflow_mode=manifest.mode_id,
-                workflow_version=manifest.mode_version,
-                capability=self.capability_runtime.resolve(
-                    capability_id,
-                    manifest.bindings[slot_name].requirements(
-                        manifest.mode_id, manifest.mode_version
-                    ),
-                ),
+            self._resolve_node(
+                stage=stage,
+                node_path=node_path or stage.id,
+                slot_name=slot_name,
+                capability_id=capability_id,
+                manifest=manifest,
             )
             for slot_name, capability_id in stage.bindings.items()
         )
@@ -123,6 +158,39 @@ class DefaultWorkflowRuntime:
             workflow=ResolvedWorkflow.from_manifest(manifest),
             nodes=nodes,
             output_validator=stage.output_validator,
+        )
+
+    def _resolve_node(
+        self,
+        *,
+        stage: StageDefinition,
+        node_path: str,
+        slot_name: str,
+        capability_id: str,
+        manifest: WorkflowManifest,
+    ) -> ResolvedNode:
+        requirements = manifest.bindings[slot_name].requirements(
+            manifest.mode_id, manifest.mode_version
+        )
+        capability = self.capability_runtime.resolve(capability_id, requirements)
+        provider_binding = None
+        if self.provider_resolver is not None:
+            site = ProviderBindingSite(
+                node_path=node_path, stage_id=stage.id, slot=slot_name
+            )
+            try:
+                provider_binding = self.provider_resolver.resolve(
+                    site, capability, requirements
+                )
+            except ValueError as error:
+                raise WorkflowBindingError(str(error)) from error
+        return ResolvedNode(
+            node_id=f"{stage.id}:{slot_name}",
+            slot=slot_name,
+            workflow_mode=manifest.mode_id,
+            workflow_version=manifest.mode_version,
+            capability=capability,
+            provider_binding=provider_binding,
         )
 
     def resolve_journey(self, definition: JourneyDefinition) -> ResolvedJourney:
@@ -134,7 +202,7 @@ class DefaultWorkflowRuntime:
             journey_version=definition.version,
             order=compiled.topological_order,
             stages=tuple(
-                self.resolve(node)
+                self.resolve(node, node_path=node.id)
                 for node in outer_nodes
                 if isinstance(node, StageDefinition)
             ),
@@ -162,7 +230,7 @@ class DefaultWorkflowRuntime:
             exit_node_ids=compiled.exit_node_ids,
             edges=compiled.edges,
             stages=tuple(
-                self.resolve(node)
+                self.resolve(node, node_path=f"{definition.id}/{node.id}")
                 for node in definition.nodes
                 if isinstance(node, StageDefinition)
             ),

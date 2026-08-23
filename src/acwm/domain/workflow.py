@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from .capability import CapabilityFeature, WorkflowRequirements
+from .capability import ArtifactRequirement, CapabilityFeature, WorkflowRequirements
 from .contracts import ArtifactRef, HandoffEnvelope, ImmutableModel
 from .execution import ResolvedNode
 from .journey_definition import (
@@ -22,6 +22,8 @@ class WorkflowBindingSlot(ImmutableModel):
     required_features: frozenset[CapabilityFeature]
     optional_features: frozenset[CapabilityFeature] = frozenset()
     required: bool = True
+    input_artifacts: tuple[ArtifactRequirement, ...] = ()
+    output_artifacts: tuple[ArtifactRequirement, ...] = ()
 
     def requirements(self, mode_id: str, mode_version: str) -> WorkflowRequirements:
         return WorkflowRequirements(
@@ -29,6 +31,8 @@ class WorkflowBindingSlot(ImmutableModel):
             mode_version=mode_version,
             required=self.required_features,
             optional=self.optional_features,
+            input_artifacts=self.input_artifacts,
+            output_artifacts=self.output_artifacts,
         )
 
 

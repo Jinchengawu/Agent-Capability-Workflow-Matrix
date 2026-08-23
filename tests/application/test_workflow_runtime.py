@@ -7,15 +7,18 @@ from acwm.adapters.agentscope_role_turn import AgentScopeRoleTurnAdapter
 from acwm.adapters.code_delivery import CodeDeliveryWorkflowAdapter
 from acwm.application.workflow_runtime import (
     DefaultWorkflowRuntime,
+    StaticProviderResolver,
     WorkflowBindingError,
 )
 from acwm.domain import (
     ApprovalGateDefinition,
     CapabilityFeature,
+    CapabilityProviderManifest,
     JourneyDefinition,
     JourneyEdgeDefinition,
     LoopDefinition,
     LoopPolicyDefinition,
+    ProviderCapability,
     ResolvedCapability,
     StageDefinition,
     StageExecutionSpec,
@@ -100,6 +103,78 @@ def test_workflow_runtime_resolves_every_named_capability_binding() -> None:
     assert resolved.workflow.adapter_version == "2.0.5"
     assert resolved.nodes[0].slot == "actor"
     assert resolved.nodes[0].capability.capability_id == "hermes-pm"
+
+
+def test_workflow_runtime_freezes_provider_selected_by_stage_binding_site() -> None:
+    provider = CapabilityProviderManifest.create(
+        provider_id="pm-agent",
+        provider_revision="2",
+        capabilities=(ProviderCapability(id="hermes-pm", version="1.0.0"),),
+        workflow_modes=("agentscope.role-turn",),
+        required_features=frozenset({CapabilityFeature.TEXT_FINAL}),
+    )
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        provider_resolver=StaticProviderResolver({"requirements.actor": provider}),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    resolved = runtime.resolve(
+        StageDefinition(
+            id="requirements",
+            workflow_mode="agentscope.role-turn",
+            bindings={"actor": "hermes-pm"},
+        )
+    )
+
+    binding = resolved.nodes[0].provider_binding
+    assert binding is not None
+    assert binding.provider.provider_id == "pm-agent"
+    assert binding.site.reference == "requirements.actor"
+    assert binding.verify()
+
+
+def test_workflow_runtime_rejects_provider_without_requested_capability() -> None:
+    incompatible = CapabilityProviderManifest.create(
+        provider_id="designer",
+        provider_revision="1",
+        capabilities=(ProviderCapability(id="design.review", version="1.0.0"),),
+        workflow_modes=("agentscope.role-turn",),
+    )
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        provider_resolver=StaticProviderResolver({"requirements.actor": incompatible}),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    with pytest.raises(WorkflowBindingError, match="does not provide hermes-pm"):
+        runtime.resolve(
+            StageDefinition(
+                id="requirements",
+                workflow_mode="agentscope.role-turn",
+                bindings={"actor": "hermes-pm"},
+            )
+        )
+
+
+def test_workflow_runtime_rejects_missing_provider_assignment_for_binding_site() -> None:
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        provider_resolver=StaticProviderResolver({}),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    with pytest.raises(
+        WorkflowBindingError,
+        match=r"provider assignment missing for requirements\.actor",
+    ):
+        runtime.resolve(
+            StageDefinition(
+                id="requirements",
+                workflow_mode="agentscope.role-turn",
+                bindings={"actor": "hermes-pm"},
+            )
+        )
 
 
 def test_workflow_runtime_rejects_missing_or_unknown_binding_slots() -> None:

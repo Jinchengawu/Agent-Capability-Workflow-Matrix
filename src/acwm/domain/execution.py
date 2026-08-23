@@ -9,6 +9,7 @@ from pydantic import Field
 
 from .capability import CapabilityFeature, ResolvedCapability, WorkflowRequirements
 from .contracts import ArtifactRef, HandoffEnvelope, ImmutableModel
+from .provider import ResolvedProviderBinding
 from .state import AttemptStatus, GateStatus, JourneyStatus, StageStatus
 
 
@@ -51,6 +52,7 @@ class ResolvedNode(ImmutableModel):
     workflow_mode: str
     workflow_version: str
     capability: ResolvedCapability
+    provider_binding: ResolvedProviderBinding | None = None
 
 
 class StageSnapshot(ImmutableModel):

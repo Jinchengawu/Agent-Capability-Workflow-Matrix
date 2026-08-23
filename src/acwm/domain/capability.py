@@ -32,11 +32,19 @@ class CapabilityDescriptor(ImmutableModel):
     policy: CapabilityPolicy = CapabilityPolicy()
 
 
+class ArtifactRequirement(ImmutableModel):
+    id: str
+    version: str
+    modalities: frozenset[str] = frozenset()
+
+
 class WorkflowRequirements(ImmutableModel):
     mode_id: str
     mode_version: str
     required: frozenset[CapabilityFeature]
     optional: frozenset[CapabilityFeature] = frozenset()
+    input_artifacts: tuple[ArtifactRequirement, ...] = ()
+    output_artifacts: tuple[ArtifactRequirement, ...] = ()
 
 
 class AdapterManifest(ImmutableModel):
