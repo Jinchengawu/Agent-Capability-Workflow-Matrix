@@ -1,5 +1,7 @@
 # Agent Capability–Workflow Matrix
 
+[中文节点版架构图](README-CN.md)
+
 ACWM 是面向应用层长程任务的薄控制平面。它把 Agent 的深度能力与 Agent 参与的工作制度分离，让一个 Journey 可以跨越 AgentScope、Direct、LangGraph 等不同 Workflow Mode，同时保持可恢复、可审批和可审计。
 
 ```text
@@ -10,6 +12,13 @@ Agent-Team-OS / consuming product
 ```
 
 ACWM 不提供另一套 Agent、Memory、Session、Sandbox 或部署平台。Stage 内部的消息、拓扑、会话和 Checkpoint 属于 Workflow Adapter；Hermes/Codex 的循环、工具和私有记忆属于 Capability Adapter；产品拥有业务事实、Artifact 正文和最终 Apply。
+
+## 架构总览
+
+![ACWM v0.5 深色架构图](docs/assets/acwm-v05-architecture-dark.png)
+
+> 图基于提交 `65acf7f`，展示 v0.5 Core、可插拔 Adapter、
+> 消费产品边界及可选的 v0.2 Reference Server。
 
 ## v0.4 核心能力
 
