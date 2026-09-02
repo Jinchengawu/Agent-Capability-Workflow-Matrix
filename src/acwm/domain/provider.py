@@ -90,6 +90,22 @@ class ArtifactContract(ImmutableModel):
     ) -> tuple[str, ...]:
         return tuple(sorted(item.value for item in value))
 
+    def payload(self) -> dict[str, Any]:
+        """Return the canonical contract body without an addressing hash."""
+
+        return self.model_dump(mode="json")
+
+    def content_sha256(self) -> str:
+        """Address this exact schema/modality contract independently of a Provider."""
+
+        canonical = json.dumps(
+            self.payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
 
 class ProviderCapability(ImmutableModel):
     id: str = Field(min_length=1)

@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from acwm.adapters.hermes_acp import HermesACPCapabilityAdapter
 from acwm.application.runtime import DefaultCapabilityRuntime
@@ -8,6 +9,7 @@ from acwm.domain import (
     AgentTurn,
     CapabilityEvent,
     CapabilityFeature,
+    CapabilityPolicy,
     StageRunSpec,
     WorkflowRequirements,
 )
@@ -66,3 +68,35 @@ capabilities:
     assert "count=2" in second.text
     output_events = [event for event in events if event.type == "capability.output.delta"]
     assert len(output_events) == 2
+
+
+def test_acp_planning_policy_can_fail_closed_on_read_and_fetch_tools(tmp_path: Path) -> None:
+    adapter = HermesACPCapabilityAdapter(
+        HermesACPConfig(),
+        policy=CapabilityPolicy(read_tool_access="deny", workspace_edits="deny"),
+    )
+    spec = StageRunSpec(
+        journey_id="journey-1",
+        stage_id="planning",
+        attempt_id="attempt-1",
+        workflow_mode="agentscope.role-turn",
+        capability={
+            "capability_id": "hermes-pm",
+            "capability_version": "1.0.0",
+            "adapter_type": "hermes.acp",
+            "adapter_version": "0.2.0",
+            "features": ["io.text.final"],
+            "required_features": ["io.text.final"],
+            "config_fingerprint": "1" * 64,
+            "policy_version": "1",
+            "policy_fingerprint": "2" * 64,
+        },
+        objective="plan",
+        workspace=str(tmp_path),
+    )
+
+    assert adapter.tool_permission(spec, SimpleNamespace(kind="think")) == "allow"
+    assert adapter.tool_permission(spec, SimpleNamespace(kind="read")) == "deny"
+    assert adapter.tool_permission(spec, SimpleNamespace(kind="search")) == "deny"
+    assert adapter.tool_permission(spec, SimpleNamespace(kind="fetch")) == "deny"
+    assert adapter.tool_permission(spec, SimpleNamespace(kind="execute", raw_input={})) == "ask"

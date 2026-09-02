@@ -6,6 +6,8 @@ import hashlib
 import heapq
 import json
 
+from pydantic import Field
+
 from .contracts import ImmutableModel
 from .journey_definition import (
     JourneyDefinition,
@@ -27,6 +29,9 @@ class CompiledJourneyGraph(ImmutableModel):
     exit_node_ids: tuple[str, ...]
     edges: tuple[JourneyEdgeDefinition, ...]
     loops: tuple[CompiledLoopGraph, ...] = ()
+    stage_input_artifact_contracts: dict[
+        str, tuple[dict[str, object], ...]
+    ] = Field(default_factory=dict, exclude_if=lambda value: not value)
     fingerprint: str
 
 
@@ -53,6 +58,7 @@ def compile_journey_graph(definition: JourneyDefinition) -> CompiledJourneyGraph
         if isinstance(node, LoopDefinition)
     )
     node_by_id = {node.id: node for node in definition.graph_nodes}
+    stage_input_artifact_contracts = _stage_input_artifact_contracts(definition)
     canonical = {
         "journey_id": definition.id,
         "journey_version": definition.version,
@@ -72,8 +78,40 @@ def compile_journey_graph(definition: JourneyDefinition) -> CompiledJourneyGraph
         exit_node_ids=graph.exits,
         edges=graph.edges,
         loops=loops,
+        stage_input_artifact_contracts=stage_input_artifact_contracts,
         fingerprint=hashlib.sha256(encoded).hexdigest(),
     )
+
+
+def _stage_input_artifact_contracts(
+    definition: JourneyDefinition,
+) -> dict[str, tuple[dict[str, object], ...]]:
+    from .journey_definition import StageDefinition
+
+    result: dict[str, tuple[dict[str, object], ...]] = {}
+
+    def add(stage: StageDefinition, path: str) -> None:
+        if not stage.input_artifact_contracts:
+            return
+        result[path] = tuple(
+            {
+                **contract.payload(),
+                "sha256": contract.content_sha256(),
+            }
+            for contract in sorted(
+                stage.input_artifact_contracts,
+                key=lambda item: (item.id, item.version),
+            )
+        )
+
+    for node in definition.graph_nodes:
+        if isinstance(node, StageDefinition):
+            add(node, node.id)
+        elif isinstance(node, LoopDefinition):
+            for child in node.nodes:
+                if isinstance(child, StageDefinition):
+                    add(child, f"{node.id}/{child.id}")
+    return dict(sorted(result.items()))
 
 
 class _AcyclicGraph(ImmutableModel):

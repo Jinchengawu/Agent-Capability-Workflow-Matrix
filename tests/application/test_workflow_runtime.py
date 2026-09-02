@@ -12,6 +12,8 @@ from acwm.application.workflow_runtime import (
 )
 from acwm.domain import (
     ApprovalGateDefinition,
+    ArtifactContract,
+    ArtifactModality,
     CapabilityFeature,
     CapabilityProviderManifest,
     JourneyDefinition,
@@ -132,6 +134,76 @@ def test_workflow_runtime_freezes_provider_selected_by_stage_binding_site() -> N
     assert binding.provider.provider_id == "pm-agent"
     assert binding.site.reference == "requirements.actor"
     assert binding.verify()
+
+
+def test_workflow_runtime_requires_each_provider_to_accept_stage_input_contracts() -> None:
+    contract = ArtifactContract(
+        id="knowledge-context-v1",
+        version="1.0.0",
+        modalities=frozenset({ArtifactModality.STRUCTURED}),
+    )
+    compatible = CapabilityProviderManifest.create(
+        provider_id="pm-agent",
+        provider_revision="2",
+        capabilities=(ProviderCapability(id="hermes-pm", version="1.0.0"),),
+        workflow_modes=("agentscope.role-turn",),
+        required_features=frozenset({CapabilityFeature.TEXT_FINAL}),
+        input_contracts=(contract,),
+    )
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        provider_resolver=StaticProviderResolver({"requirements.actor": compatible}),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    resolved = runtime.resolve(
+        StageDefinition(
+            id="requirements",
+            workflow_mode="agentscope.role-turn",
+            bindings={"actor": "hermes-pm"},
+            input_artifact_contracts=(contract,),
+        )
+    )
+
+    binding = resolved.nodes[0].provider_binding
+    assert binding is not None
+    assert [item.id for item in binding.input_artifact_requirements] == [
+        "knowledge-context-v1"
+    ]
+
+
+def test_workflow_runtime_rejects_provider_missing_stage_input_contract() -> None:
+    incompatible = CapabilityProviderManifest.create(
+        provider_id="pm-agent",
+        provider_revision="2",
+        capabilities=(ProviderCapability(id="hermes-pm", version="1.0.0"),),
+        workflow_modes=("agentscope.role-turn",),
+        required_features=frozenset({CapabilityFeature.TEXT_FINAL}),
+    )
+    runtime = DefaultWorkflowRuntime(
+        capability_runtime=CapabilityResolver(),
+        provider_resolver=StaticProviderResolver({"requirements.actor": incompatible}),
+        adapters={"agentscope.role-turn": RoleTurnWorkflow()},
+    )
+
+    with pytest.raises(
+        WorkflowBindingError,
+        match="missing input artifact contract knowledge-context-v1",
+    ):
+        runtime.resolve(
+            StageDefinition(
+                id="requirements",
+                workflow_mode="agentscope.role-turn",
+                bindings={"actor": "hermes-pm"},
+                input_artifact_contracts=(
+                    ArtifactContract(
+                        id="knowledge-context-v1",
+                        version="1.0.0",
+                        modalities=frozenset({ArtifactModality.STRUCTURED}),
+                    ),
+                ),
+            )
+        )
 
 
 def test_workflow_runtime_rejects_provider_without_requested_capability() -> None:

@@ -42,6 +42,28 @@ capabilities:
     assert catalog.adapter_configs["http-planner"].type == "http.sync"
 
 
+def test_schema_v3_loads_fail_closed_read_tool_policy(tmp_path: Path) -> None:
+    config = tmp_path / "capabilities.yaml"
+    config.write_text(
+        """
+schema_version: "3"
+capabilities:
+  - id: hermes-planner
+    version: 1.0.0
+    adapter:
+      type: hermes.acp
+    policy:
+      read_tool_access: deny
+      workspace_edits: deny
+""".strip(),
+        encoding="utf-8",
+    )
+
+    catalog = load_capabilities(config)
+
+    assert catalog.descriptors["hermes-planner"].policy.read_tool_access == "deny"
+
+
 def test_legacy_capability_schema_is_rejected(tmp_path: Path) -> None:
     config = tmp_path / "capabilities.yaml"
     config.write_text(

@@ -20,7 +20,7 @@ ACWM 不提供另一套 Agent、Memory、Session、Sandbox 或部署平台。Sta
 > 图基于提交 `65acf7f`，展示 v0.5 Core、可插拔 Adapter、
 > 消费产品边界及可选的 v0.2 Reference Server。
 
-## v0.4 核心能力
+## v0.5.1 核心能力
 
 - schema v4 外层 DAG `Journey -> Stage | Gate | Loop`；一个 Stage 支持多个具名 Capability Binding。
 - DAG 支持 fork/join 和条件策略引用；拓扑编译生成确定性顺序、入口、出口与 SHA-256。
@@ -28,13 +28,19 @@ ACWM 不提供另一套 Agent、Memory、Session、Sandbox 或部署平台。Sta
 - schema v3 线性 `steps` 继续读取并规范化为单路径 DAG。
 - `WorkflowManifest` 声明 Binding Slot 和 Feature 要求，配置不能伪造能力。
 - `ResolvedWorkflow`、`ResolvedStage`、`ResolvedNode` 固化版本与指纹。
+- Stage 可声明跨 Workflow 输入 `ArtifactContract`；编译结果按 canonical Stage Path
+  冻结契约内容 SHA-256，Provider Resolution 必须验证每个绑定 Provider 的输入兼容性。
 - `CapabilityRuntime` 与 `DefaultWorkflowRuntime` 两条独立扩展轴。
+- `CapabilityPolicy` 可分别控制 Read/Search/Fetch、Workspace Edit 与 Command Allowlist；Hermes ACP
+  在调用产品 Permission Broker 前先解析 `allow | ask | deny`，显式 `deny` 不得降级成人工批准。
 - 带哈希的 `HandoffEnvelope` 与通用 `GateSubject`。
 - 产品可注入 `StageOutputValidator`，失败时阻止 Stage 成功。
 - `agentscope.role-turn`、`code-delivery`、Hermes ACP、Codex CLI、HTTP sync 参考 Adapter。
 - Core 延迟加载所有可选集成；导入 Core 不需要 AgentScope、LangGraph、FastAPI、ACP 或 HTTPX。
 
-详细边界见 [RFC-0003](docs/architecture/RFC-0003-THIN-ACWM-CONTROL-PLANE.md) 和 [ADR-0003](docs/architecture/ADR-0003-THIN-CONTROL-PLANE.md)。
+详细边界见 [RFC-0003](docs/architecture/RFC-0003-THIN-ACWM-CONTROL-PLANE.md)、
+[ADR-0003](docs/architecture/ADR-0003-THIN-CONTROL-PLANE.md) 和
+[ADR-0006](docs/architecture/ADR-0006-STAGE-INPUT-ARTIFACT-CONTRACTS.md)。
 
 ## 安装与验证
 

@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import acp
@@ -145,23 +145,27 @@ class _ACPClient:
         **_kwargs: Any,
     ) -> RequestPermissionResponse:
         state = self.owner._turn_by_session.get(session_id)
-        approved = False
+        permission: Literal["allow", "ask", "deny"] = "deny"
         if state is not None:
-            approved = self.owner._is_policy_allowed(state.spec, tool_call)
-            if not approved:
-                approved = await self.owner._permissions.ask(
-                    state,
-                    {
-                        "title": getattr(tool_call, "title", "Permission required"),
-                        "kind": getattr(tool_call, "kind", None),
-                        "locations": [
-                            item.model_dump(mode="json")
-                            for item in (getattr(tool_call, "locations", None) or [])
-                        ],
-                        "raw_input": getattr(tool_call, "raw_input", None),
-                    },
+            permission = self.owner.tool_permission(state.spec, tool_call)
+            if permission == "ask":
+                permission = (
+                    "allow"
+                    if await self.owner._permissions.ask(
+                        state,
+                        {
+                            "title": getattr(tool_call, "title", "Permission required"),
+                            "kind": getattr(tool_call, "kind", None),
+                            "locations": [
+                                item.model_dump(mode="json")
+                                for item in (getattr(tool_call, "locations", None) or [])
+                            ],
+                            "raw_input": getattr(tool_call, "raw_input", None),
+                        },
+                    )
+                    else "deny"
                 )
-        if approved:
+        if permission == "allow":
             option = next((item for item in options if item.kind == "allow_once"), options[0])
             return RequestPermissionResponse(
                 outcome=AllowedOutcome(outcome="selected", option_id=option.option_id)
@@ -315,32 +319,40 @@ class HermesACPCapabilityAdapter:
             and self._process.returncode is None
         )
 
-    def _is_policy_allowed(self, spec: StageRunSpec, tool_call: Any) -> bool:
+    def tool_permission(
+        self, spec: StageRunSpec, tool_call: Any
+    ) -> Literal["allow", "ask", "deny"]:
+        """Resolve tool access before ACP asks the product permission broker."""
+
         kind = getattr(tool_call, "kind", None)
-        if kind in {"read", "search", "think", "fetch"}:
-            return True
-        if kind in {"edit", "delete", "move"} and self.policy.workspace_edits == "allow":
+        if kind == "think":
+            return "allow"
+        if kind in {"read", "search", "fetch"}:
+            return self.policy.read_tool_access
+        if kind in {"edit", "delete", "move"}:
+            if self.policy.workspace_edits != "allow":
+                return self.policy.workspace_edits
             root = Path(cast(str, spec.workspace)).resolve()
             locations = getattr(tool_call, "locations", None) or []
             if not locations:
-                return False
+                return "ask"
             for location in locations:
                 raw_path = getattr(location, "path", None)
                 if not raw_path:
-                    return False
+                    return "ask"
                 candidate = Path(raw_path)
                 if not candidate.is_absolute():
                     candidate = root / candidate
                 try:
                     candidate.resolve().relative_to(root)
                 except ValueError:
-                    return False
-            return True
+                    return "ask"
+            return "allow"
         if kind == "execute":
             raw = getattr(tool_call, "raw_input", None)
             command = raw.get("command", "") if isinstance(raw, dict) else str(raw or "")
-            return any(
+            return "allow" if any(
                 command == allowed or command.startswith(f"{allowed} ")
                 for allowed in self.policy.command_allowlist
-            )
-        return False
+            ) else "ask"
+        return "ask"

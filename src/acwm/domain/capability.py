@@ -20,6 +20,7 @@ class CapabilityFeature(StrEnum):
 
 class CapabilityPolicy(ImmutableModel):
     version: str = "1.0"
+    read_tool_access: Literal["allow", "ask", "deny"] = "allow"
     workspace_edits: Literal["allow", "ask", "deny"] = "ask"
     command_allowlist: tuple[str, ...] = ()
 

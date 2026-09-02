@@ -8,6 +8,8 @@ from typing import Any, Protocol
 
 from acwm.domain import (
     ApprovalGateDefinition,
+    ArtifactContract,
+    ArtifactRequirement,
     CapabilityProviderManifest,
     JourneyDefinition,
     LoopDefinition,
@@ -172,6 +174,10 @@ class DefaultWorkflowRuntime:
         requirements = manifest.bindings[slot_name].requirements(
             manifest.mode_id, manifest.mode_version
         )
+        requirements = _with_stage_input_contracts(
+            requirements,
+            stage.input_artifact_contracts,
+        )
         capability = self.capability_runtime.resolve(capability_id, requirements)
         provider_binding = None
         if self.provider_resolver is not None:
@@ -255,3 +261,37 @@ class DefaultWorkflowRuntime:
         if report.status == "failed":
             raise StageValidationError(report.summary)
         return result.model_copy(update={"validation": report})
+
+
+def _with_stage_input_contracts(
+    requirements: WorkflowRequirements,
+    contracts: tuple[ArtifactContract, ...],
+) -> WorkflowRequirements:
+    """Merge Stage-owned cross-workflow inputs into each named binding requirement."""
+
+    if not contracts:
+        return requirements
+    merged = {
+        (item.id, item.version): item
+        for item in requirements.input_artifacts
+    }
+    for contract in contracts:
+        key = (contract.id, contract.version)
+        modalities = frozenset(item.value for item in contract.modalities)
+        existing = merged.get(key)
+        merged[key] = ArtifactRequirement(
+            id=contract.id,
+            version=contract.version,
+            modalities=(
+                modalities
+                if existing is None
+                else existing.modalities | modalities
+            ),
+        )
+    return requirements.model_copy(
+        update={
+            "input_artifacts": tuple(
+                merged[key] for key in sorted(merged)
+            )
+        }
+    )

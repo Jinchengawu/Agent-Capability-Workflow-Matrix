@@ -4,6 +4,9 @@ ACWM separates an Agent's deep execution ability from the workflow institution i
 ability participates. It is a cross-Workflow Journey control plane, not an Agent framework.
 
 - **Capability**: stable identity, labels and policy for an Agent ability. It owns no run state.
+- **Capability Policy**: immutable tool boundary for read/search/fetch, workspace edits and command
+  allowlists. A Capability Adapter resolves explicit denial before asking a consuming product for
+  permission; denial cannot be upgraded by an approval callback.
 - **Adapter**: provider-specific implementation that declares its immutable feature manifest and
   translates native behavior into ACWM turns, signals and events.
 - **Artifact Contract**: versioned schema and content-modality requirement for data crossing a
@@ -22,7 +25,9 @@ ability participates. It is a cross-Workflow Journey control plane, not an Agent
 - **ResolvedNode**: immutable snapshot of the Stage's Capability, Adapter, features, Workflow and
   policy/config fingerprints, plus an optional Resolved Provider Binding. Recovery uses this
   snapshot and never silently re-resolves it.
-- **Stage**: one Workflow boundary with one or more named Capability bindings.
+- **Stage**: one Workflow boundary with one or more named Capability bindings. It may declare
+  immutable input Artifact Contracts that every bound Provider must accept; the compiled Journey
+  freezes those contracts by canonical Stage path and content hash.
 - **Node**: one resolved Capability/Workflow matrix cell inside a Stage.
 - **ResolvedStage**: immutable Workflow snapshot plus all of its ResolvedNodes.
 - **Stage Exchange**: one Attempt-scoped Capability context owned by a Workflow Adapter.

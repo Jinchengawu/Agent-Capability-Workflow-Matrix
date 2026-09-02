@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from .contracts import ImmutableModel
+from .provider import ArtifactContract
 
 
 class StageDefinition(ImmutableModel):
@@ -19,6 +20,10 @@ class StageDefinition(ImmutableModel):
     workflow_mode: str
     bindings: dict[str, str]
     output_validator: str | None = None
+    input_artifact_contracts: tuple[ArtifactContract, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
 
     @model_validator(mode="after")
     def has_named_capability_bindings(self) -> "StageDefinition":
@@ -29,6 +34,9 @@ class StageDefinition(ImmutableModel):
             for slot, capability_id in self.bindings.items()
         ):
             raise ValueError("Stage binding names and Capability ids must not be blank")
+        contract_ids = [contract.id for contract in self.input_artifact_contracts]
+        if len(contract_ids) != len(set(contract_ids)):
+            raise ValueError("Stage input Artifact Contract ids must be unique")
         return self
 
     @property
